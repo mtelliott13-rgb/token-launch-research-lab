@@ -1,0 +1,89 @@
+# Meme Radar settings. Edit and restart `uv run python -m radar` to apply.
+
+server:
+  host: 127.0.0.1        # local only; do not expose this to the network
+  port: 8000
+
+database:
+  path: data/radar.db
+
+logging:
+  dir: data/logs
+  level: INFO
+
+sources:
+  pumpportal:
+    url: wss://pumpportal.fun/api/data
+    reconnect_min_s: 1
+    reconnect_max_s: 60
+    stale_after_s: 120          # reconnect if nothing arrives for this long
+  dexscreener:
+    base_url: https://api.dexscreener.com
+    pairs_per_min: 120          # documented limit ~300/min on token/pair endpoints
+    profiles_per_min: 20        # documented limit ~60/min on profile/boost endpoints
+    profiles_poll_s: 60
+    boosts_poll_s: 60
+    batch_size: 30              # max addresses per /tokens/v1 call
+    max_batches_per_cycle: 6
+    cycle_s: 5
+  geckoterminal:
+    base_url: https://api.geckoterminal.com/api/v2
+    per_min: 8                  # documented 30/min; keyless traffic may get less
+    new_pools_poll_s: 60
+    trending_poll_s: 120
+    ohlcv_cache_s: 45
+    ohlcv_limit: 300
+  rugcheck:
+    base_url: https://api.rugcheck.xyz/v1
+    per_min: 12
+    cache_s: 900                # reuse a report for this long
+    recheck_s: 1800             # re-check tokens that stay on the Rising list
+    rising_top_n: 25            # how many Rising tokens get a safety check
+    max_queue: 200
+
+# How often each token's pair data is re-fetched from DexScreener (seconds).
+# A token that matches no rule stops being refreshed (Phase 2 adds follow-up snapshots).
+refresh:
+  first_delay_s: 20             # wait after creation so DexScreener has indexed it
+  watched_s: 10
+  featured_s: 30                # trending, Rising, recently boosted/profiled, just graduated
+  featured_migrated_window_s: 3600
+  featured_trending_window_s: 600
+  featured_rising_window_s: 120
+  featured_promo_window_s: 3600
+  fresh_age_s: 600
+  fresh_s: 60
+  young_age_s: 3600
+  young_alive_s: 120
+  young_quiet_s: 600
+  day_alive_s: 300
+  day_quiet_migrated_s: 1800
+  max_age_s: 86400
+  alive_min_txns_h1: 5
+  max_misses: 6                 # give up after DexScreener returns nothing this many times
+
+# Momentum score v0. Documented in the dashboard; to be tuned with backtests later.
+momentum:
+  weights:
+    volume_acceleration: 0.4
+    buy_pressure: 0.3
+    txn_growth: 0.3
+  volume_floor_usd: 100         # floor for hourly volume, avoids divide-by-tiny
+  txn_floor: 1                  # floor for the average 5-minute transaction count
+
+rising:
+  min_liquidity_usd: 10000      # for tokens with a liquidity pool
+  min_curve_mcap_usd: 15000     # for tokens still on the bonding curve (no pool liquidity yet)
+  min_age_min: 3
+  min_txns_m5: 10
+  max_snapshot_age_s: 180       # ignore tokens whose data is older than this
+  limit: 50
+  refresh_s: 10
+
+dashboard:
+  launches_limit: 200
+  default_filters:
+    min_liquidity_usd: 0
+    max_top10_pct: 100
+    hide_authority: false
+    graduated_only: false

@@ -1,0 +1,16 @@
+# Secrets
+.env
+*.session
+*.session-journal
+
+# Collected data, logs, scratch files
+data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store
