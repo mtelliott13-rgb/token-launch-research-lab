@@ -78,10 +78,26 @@
   <div class="tiles" id="tiles"></div>
 
   <section>
-    <div class="head"><h2>Outcome labels</h2><span class="sub" id="labels-sub"></span></div>
+    <div class="head"><h2>Peak</h2><span class="sub" id="peak-sub">how good the best moment in the first 24 hours was</span></div>
     <div class="wrap"><table>
-      <thead><tr><th>Label</th><th></th><th class="num">Tokens</th><th class="num">Share</th><th class="num" title="Tokens whose 7-day follow-up has passed, so the label can no longer change">Final</th></tr></thead>
-      <tbody id="labels"></tbody>
+      <thead><tr><th>Peak</th><th></th><th class="num">Tokens</th><th class="num">Share</th><th class="num" title="Tokens whose 7-day follow-up has passed, so nothing can change any more">Final</th></tr></thead>
+      <tbody id="peak"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Fate</h2><span class="sub">how it ended, judged at day 7</span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Fate</th><th></th><th class="num">Tokens</th><th class="num">Share</th><th class="num" title="Tokens whose 7-day follow-up has passed, so nothing can change any more">Final</th></tr></thead>
+      <tbody id="fate"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Peak by fate</h2><span class="sub">a token that pumped and then rugged counts under both</span></div>
+    <div class="wrap"><table>
+      <thead id="cross-head"></thead>
+      <tbody id="cross"></tbody>
     </table></div>
     <div class="body"><div class="note" id="labels-note"></div></div>
   </section>
@@ -106,6 +122,15 @@
       <tbody id="followups"></tbody>
     </table></div>
     <div class="body"><div class="note" id="followups-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Data retention</h2><span class="sub" id="retention-sub"></span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Snapshots</th><th></th><th class="num">Tokens</th><th class="num">Share</th></tr></thead>
+      <tbody id="retention"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="retention-note"></div></div>
   </section>
 
   <section>
@@ -154,7 +179,7 @@ function barRow(name, desc, count, total, extra) {
 }
 
 function render(d) {
-  const o = d.outcomes, L = d.labels;
+  const o = d.outcomes, L = d.thresholds;
   const span = d.first_seen_at ? d.now - d.first_seen_at : null;
   $("tiles").replaceChildren(...[
     ["Tokens recorded", fmtInt(d.tokens), span ? `over ${fmtAge(span)}, ${fmtInt(d.snapshots)} snapshots` : ""],
@@ -163,24 +188,32 @@ function render(d) {
     ["Still being followed", fmtInt(d.followups_pending), "tokens with checkpoints still to come"],
   ].map(([k, v, s]) => h("div", { class: "tile" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v), h("div", { class: "d" }, s))));
 
-  const by = Object.fromEntries(o.labels.map((l) => [l.label ?? "", l]));
-  const defs = [
-    ["moonshot", `peak in the first 24h was ${L.moonshot_multiple}× p0 or more`],
-    ["runner", `peak in the first 24h was ${L.runner_multiple}× to ${L.moonshot_multiple}× p0`],
-    ["rug", `price or pool liquidity fell ${L.rug_drop_pct}% within ${Math.round(L.rug_window_s / 60)} min, or RugCheck flagged it`],
-    ["dead", `24h volume under $${fmtInt(L.dead_vol_h24_usd)} at day 7`],
-    ["flat", "none of the above, once day 7 has passed"],
-    ["no_data", "we never saw a price for it"],
-    ["", "cannot tell yet: dead and flat need day 7"],
+  const PEAKS = [
+    ["moonshot", `peak was ${L.moonshot_multiple}× p0 or more`],
+    ["runner", `peak was ${L.runner_multiple}× to ${L.moonshot_multiple}× p0`],
+    ["flat", `peak stayed under ${L.runner_multiple}× p0`],
+    ["", "cannot tell yet: the 24 hours are not over, or we never saw a price"],
   ];
-  const known = new Set(defs.map((x) => x[0]));
-  for (const l of o.labels) if (!known.has(l.label ?? "")) defs.push([l.label, ""]);
-  $("labels").replaceChildren(...defs.map(([key, desc]) => {
-    const l = by[key] || { count: 0, final: 0 };
-    return barRow(key || "not labelled yet", desc, l.count, o.total, num(fmtInt(l.final)));
-  }));
-  $("labels-sub").textContent = `${fmtInt(o.total)} tokens with an outcome row, ${fmtInt(o.complete)} complete`;
-  $("labels-note").textContent = `One label per token, first match from the top. ${fmtInt(o.rugged)} tokens carry the "rugged" flag in total, because a runner or moonshot that later collapsed keeps its label. Labels are provisional until a token is past day 7. p0 is the first DexScreener price we saw, usually about 90 seconds after launch. Thresholds are in config/settings.yaml.`;
+  const FATES = [
+    ["rugged", `price or pool liquidity fell ${L.rug_drop_pct}% within ${Math.round(L.rug_window_s / 60)} min, or RugCheck flagged it`],
+    ["dead", `24h volume under $${fmtInt(L.dead_vol_h24_usd)} at day 7, or no longer listed`],
+    ["alive", "still trading at day 7 and never rugged"],
+    ["", "cannot tell yet: needs day 7, unless it has already rugged"],
+  ];
+  const sum = (pick) => o.groups.filter(pick).reduce((a, g) => ({ count: a.count + g.count, final: a.final + g.final }), { count: 0, final: 0 });
+  const rows = (defs, field) => defs.map(([key, desc]) => {
+    const t = sum((g) => (g[field] ?? "") === key);
+    return barRow(key || "not known yet", desc, t.count, o.total, num(fmtInt(t.final)));
+  });
+  $("peak").replaceChildren(...rows(PEAKS, "peak"));
+  $("fate").replaceChildren(...rows(FATES, "fate"));
+  const name = (k) => k || "not known yet";
+  $("cross-head").replaceChildren(h("tr", null, h("th", null, "Peak ↓  /  Fate →"),
+    FATES.map(([f]) => h("th", { class: "num" }, name(f))), h("th", { class: "num" }, "All")));
+  $("cross").replaceChildren(...PEAKS.map(([pk]) => h("tr", null, h("td", null, name(pk)),
+    FATES.map(([f]) => num(fmtInt(sum((g) => (g.peak ?? "") === pk && (g.fate ?? "") === f).count))),
+    num(fmtInt(sum((g) => (g.peak ?? "") === pk).count)))));
+  $("labels-note").textContent = `${fmtInt(o.total)} tokens have an outcome row, ${fmtInt(o.complete)} are complete. Both verdicts are provisional until a token is past day 7: a runner can still become a moonshot, and anything can still rug. p0 is the first DexScreener price we saw, usually about 90 seconds after launch. Thresholds are in config/settings.yaml.`;
 
   const fields = [
     ["p0_price", "First price (p0)"], ["peak_multiple_24h", "Peak multiple, first 24h (so far, until 24h has passed)"],
@@ -196,6 +229,14 @@ function render(d) {
   }));
   const s = d.since_start;
   $("followups-note").textContent = `Since the app last started: ${fmtInt(s.done)} done, ${fmtInt(s.no_data)} no data, ${fmtInt(s.skipped)} skipped. Coverage is the share of checkpoints we have an answer for. Skipped means the collector was off or behind when the check was due, so that figure is unknown.`;
+
+  const R = d.retention || {}, P = d.retention_policy, rs = d.retention_since_start;
+  $("retention").replaceChildren(
+    barRow("kept in full", `graduated, reached $${fmtInt(P.keep_min_peak_mcap_usd)} market cap, or watched`, R.kept || 0, d.tokens),
+    barRow("dropped", "died early: the token, its outcome and its checkpoint figures stay", R.pruned || 0, d.tokens),
+    barRow("not decided yet", `decided once the token is ${P.after_days} days old and its outcome is final`, R.undecided || 0, d.tokens));
+  $("retention-sub").textContent = P.enabled ? `on: early-dead tokens lose their snapshots after ${P.after_days} days` : "off: everything is kept";
+  $("retention-note").textContent = `Since the app last started: ${fmtInt(rs.pruned)} tokens dropped (${fmtInt(rs.snapshots_deleted)} snapshot rows), ${fmtInt(rs.kept)} kept. The database file does not shrink when rows are dropped; the freed space is reused, so it grows more slowly. Settings are under retention: in config/settings.yaml.`;
 
   const kinds = { ok: "ok", starting: "idle", degraded: "warn", stale: "warn", down: "crit" };
   $("health").replaceChildren(...Object.values(d.sources).map((src) => h("tr", null,

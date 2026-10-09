@@ -25,16 +25,33 @@ ADDED_COLUMNS = {
         "bot_volume": "INTEGER",
         "followup_idx": "INTEGER",
         "followup_at": "REAL",
+        "retention": "TEXT",
+        "retention_at": "REAL",
+        "peak_mcap": "REAL",
+    },
+    "outcomes": {"peak": "TEXT", "fate": "TEXT"},
+    "followups": {
+        "vol_m5": "REAL", "vol_h1": "REAL", "buys_m5": "INTEGER", "sells_m5": "INTEGER",
+        "buys_h1": "INTEGER", "sells_h1": "INTEGER", "price_chg_m5": "REAL", "price_chg_h1": "REAL",
     },
 }
 # Indexes on those columns, created after the columns are sure to exist.
 ADDED_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_state_followup ON token_state(followup_at)",
+    "CREATE INDEX IF NOT EXISTS idx_outcomes_peak_fate ON outcomes(peak, fate)",
+    # Tokens whose follow-ups are finished and whose snapshots await a keep-or-drop decision.
+    "CREATE INDEX IF NOT EXISTS idx_state_retention ON token_state(mint) "
+    "WHERE retention IS NULL AND followup_at IS NULL AND followup_idx IS NOT NULL",
 )
 OUTCOME_FIELDS = (
     "p0_price", "p0_ts", "peak_multiple_24h", "time_to_peak_min", "multiple_1h", "multiple_24h",
-    "multiple_72h", "multiple_7d", "max_drawdown_before_peak", "rugged", "dead_at_7d", "label",
+    "multiple_72h", "multiple_7d", "max_drawdown_before_peak", "rugged", "dead_at_7d", "peak", "fate",
     "final", "complete", "missing", "computed_at",
+)
+# What a follow-up checkpoint records about the token at that moment.
+FOLLOWUP_FIELDS = (
+    "price_usd", "mcap", "liquidity_usd", "vol_h24", "vol_m5", "vol_h1", "buys_m5", "sells_m5",
+    "buys_h1", "sells_h1", "price_chg_m5", "price_chg_h1",
 )
 
 
@@ -74,6 +91,10 @@ class Store:
                 "UPDATE token_state SET total_holders = (SELECT total_holders FROM safety "
                 "WHERE safety.mint = token_state.mint ORDER BY ts DESC LIMIT 1) WHERE safety_ts IS NOT NULL"
             )
+        # The single outcome label was split into `peak` and `fate`.
+        self.db.execute("DROP INDEX IF EXISTS idx_outcomes_label")
+        if any(r["name"] == "label" for r in self.db.execute("PRAGMA table_info(outcomes)")):
+            self.db.execute("ALTER TABLE outcomes DROP COLUMN label")
         for statement in ADDED_INDEXES:
             self.db.execute(statement)
 
@@ -192,10 +213,9 @@ class Store:
     ) -> None:
         seen = seen or {}
         self.db.execute(
-            "INSERT OR REPLACE INTO followups (mint, checkpoint, due_at, done_at, status, price_usd, mcap, "
-            "liquidity_usd, vol_h24) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (mint, checkpoint, due_at, done_at, status, seen.get("price_usd"), seen.get("mcap"),
-             seen.get("liquidity_usd"), seen.get("vol_h24")),
+            f"INSERT OR REPLACE INTO followups (mint, checkpoint, due_at, done_at, status, {', '.join(FOLLOWUP_FIELDS)}) "
+            f"VALUES (?, ?, ?, ?, ?, {', '.join('?' * len(FOLLOWUP_FIELDS))})",
+            (mint, checkpoint, due_at, done_at, status, *(seen.get(k) for k in FOLLOWUP_FIELDS)),
         )
 
     def followups_for(self, mint: str) -> dict[str, dict[str, Any]]:
@@ -235,6 +255,24 @@ class Store:
     def outcome(self, mint: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM outcomes WHERE mint = ?", (mint,)).fetchone()
         return dict(row) if row else None
+
+    # ---- retention ----------------------------------------------------------
+
+    def retention_candidates(self, first_seen_before: float, limit: int) -> list[dict[str, Any]]:
+        """Tokens with a final outcome whose snapshots have not been judged yet."""
+        cur = self.db.execute(
+            f"{ROW_SQL} JOIN outcomes o ON o.mint = t.mint AND o.final = 1 "
+            "WHERE s.retention IS NULL AND s.followup_at IS NULL AND s.followup_idx IS NOT NULL "
+            "AND t.first_seen_at < ? LIMIT ?",
+            (first_seen_before, limit),
+        )
+        return [dict(r) for r in cur]
+
+    def peak_mcap(self, mint: str) -> float | None:
+        return self.db.execute("SELECT MAX(mcap) FROM snapshots WHERE mint = ?", (mint,)).fetchone()[0]
+
+    def delete_snapshots(self, mint: str) -> int:
+        return self.db.execute("DELETE FROM snapshots WHERE mint = ?", (mint,)).rowcount
 
     def meta(self, key: str) -> str | None:
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()

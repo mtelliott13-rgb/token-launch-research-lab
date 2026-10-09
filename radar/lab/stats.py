@@ -20,10 +20,10 @@ def collect(db: sqlite3.Connection, cfg: Mapping[str, Any]) -> dict[str, Any]:
     totals = one(
         f"SELECT COUNT(*), COALESCE(SUM(complete), 0), COALESCE(SUM(final), 0), COALESCE(SUM(rugged), 0), {have} FROM outcomes"
     )
-    labels = [
-        {"label": label, "count": count, "final": final}
-        for label, count, final in db.execute(
-            "SELECT label, COUNT(*), COALESCE(SUM(final), 0) FROM outcomes GROUP BY label"
+    groups = [
+        {"peak": peak, "fate": fate, "count": count, "final": final}
+        for peak, fate, count, final in db.execute(
+            "SELECT peak, fate, COUNT(*), COALESCE(SUM(final), 0) FROM outcomes GROUP BY peak, fate"
         )
     ]
     by_checkpoint: dict[str, dict[str, int]] = {name: {} for name, _ in checkpoints(cfg["followups"])}
@@ -40,10 +40,14 @@ def collect(db: sqlite3.Connection, cfg: Mapping[str, Any]) -> dict[str, Any]:
         "outcomes": {
             "total": totals[0], "complete": totals[1], "final": totals[2], "rugged": totals[3],
             "have": dict(zip(OUTCOME_VALUE_FIELDS, totals[4:])),
-            "labels": labels,
+            "groups": groups,
         },
         "followups": [{"checkpoint": name, **statuses} for name, statuses in by_checkpoint.items()],
         "followups_pending": one("SELECT COUNT(*) FROM token_state WHERE followup_at IS NOT NULL")[0],
+        "retention": {
+            (verdict or "undecided"): count
+            for verdict, count in db.execute("SELECT retention, COUNT(*) FROM token_state GROUP BY 1")
+        },
     }
 
 

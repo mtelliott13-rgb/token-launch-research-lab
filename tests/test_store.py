@@ -62,14 +62,23 @@ def test_older_database_gets_new_columns_and_holder_counts(tmp_path):
     s.add_safety("M1", 5.0, {"total_holders": 10})
     s.add_safety("M1", 9.0, {"total_holders": 42})
     s.update_state("M1", safety_ts=9.0)
-    s.db.execute("DROP INDEX idx_state_followup")
-    for column in ADDED_COLUMNS["token_state"]:
-        s.db.execute(f"ALTER TABLE token_state DROP COLUMN {column}")
+    # Put the database back to how the first release left it, including the old outcome label.
+    for index in ("idx_state_followup", "idx_state_retention", "idx_outcomes_peak_fate"):
+        s.db.execute(f"DROP INDEX {index}")
+    for table, columns in ADDED_COLUMNS.items():
+        for column in columns:
+            s.db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    s.db.execute("ALTER TABLE outcomes ADD COLUMN label TEXT")
+    s.db.execute("CREATE INDEX idx_outcomes_label ON outcomes(label)")
     s.close()
 
     s = Store(path)
     row = s.row("M1")
     assert row["total_holders"] == 42 and row["safety_miss_count"] == 0 and row["bot_volume"] is None
     assert s.safety_misses("M1") == (0, None)
+    outcome_columns = {r["name"] for r in s.db.execute("PRAGMA table_info(outcomes)")}
+    assert {"peak", "fate"} <= outcome_columns and "label" not in outcome_columns
+    s.add_followup("M1", "1m", 61.0, 62.0, "done", {"price_usd": 1.0, "buys_m5": 7})
+    assert s.followups_for("M1")["1m"]["buys_m5"] == 7
     s.close()
     Store(path).close()  # starting again changes nothing

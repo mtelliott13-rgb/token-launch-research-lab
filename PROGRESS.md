@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-10-09, Phase 2 built.
+Last updated: 2026-10-09, Phase 2 built, with peak/fate verdicts and data retention.
 
 ## Start the dashboard
 
@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 76 tests passing (`uv run pytest`), including Phase 2.
+- 80 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -90,8 +90,10 @@ table (Phase 3).
   graduated tokens first, then tokens at or above $15k market cap or on Rising, trending or
   watched, then the rest.
 - **Outcomes.** The `outcomes` table holds p0, peak multiple in the first 24h, time to peak,
-  multiples at 1h, 24h, 72h and 7d, drawdown before the peak, rugged, dead at day 7 and a label.
-  Rules and label order are documented at the top of `radar/lab/outcomes.py`; thresholds are
+  multiples at 1h, 24h, 72h and 7d, drawdown before the peak, rugged, dead at day 7, and two
+  verdicts: `peak` (moonshot / runner / flat, from the 24h peak) and `fate` (rugged / dead /
+  alive at day 7), so a token that pumped and then rugged shows both. Either is empty until it
+  can be told. Rules are documented at the top of `radar/lab/outcomes.py`; thresholds are
   under `outcomes:` in `config/settings.yaml`. `final` means day 7 has passed, `complete` means
   final with nothing missing, and `missing` lists what is not there.
 - **Existing tokens.** On the first start with this code, tokens already in the database get
@@ -109,9 +111,25 @@ Things to know about Phase 2 data:
 - A few tokens show absurd peaks (thousands of times p0 or more). These are real DexScreener
   prices from pools with almost no liquidity, not something anyone could have traded. Phase 4
   needs a liquidity filter before these are counted as wins.
-- A runner or moonshot that later collapsed keeps its label and also has rugged = 1.
-- Disk: the database grows by roughly 250 MB a day; follow-ups add an estimated 35 MB a day.
-  There is no pruning yet.
+
+## Data retention (added 2026-10-09)
+
+- Once a token is 7 days old and its outcome is final, it is judged once. Snapshots are kept in
+  full if it graduated, reached a $30,000 market cap, or is watched. Otherwise its snapshots are
+  deleted; the token, its outcome, its follow-up checkpoint rows, its raw launch event and its
+  safety reports stay. Code: `radar/lab/retention.py`; settings under `retention:`.
+- Follow-up checkpoint rows now also hold 5-minute and 1-hour volume, buys, sells and price
+  change, because for dropped tokens those rows are all that is left of their history.
+- Measured on a copy of one day of data: about 11% of tokens are kept and they hold about 42% of
+  the snapshot rows; the database went from 248 MB to 171 MB.
+- Expected growth: about 2.1 GB a week without retention, about 1.5 GB a week with it. The first
+  week still grows at the full rate, because nothing is 7 days old until 2026-10-15. The file
+  never shrinks; freed space is reused.
+- What is left after retention, per day: kept snapshots about 65 MB, checkpoint rows about
+  47 MB, token rows about 35 MB, raw launch events about 32 MB, safety reports about 22 MB,
+  outcomes about 10 MB.
+- Cost: for a dropped token, Phase 4 can only test signals at the checkpoint moments (1m, 5m,
+  15m, 1h, ...), not at arbitrary minutes in between.
 
 ## Open decisions
 

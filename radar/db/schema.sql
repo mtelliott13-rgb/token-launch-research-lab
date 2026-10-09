@@ -165,7 +165,12 @@ CREATE TABLE IF NOT EXISTS token_state (
     safety_retry_at             REAL,      -- when to ask again; NULL with misses > 0 means we stopped asking
     bot_volume                  INTEGER,   -- 1 = many trades but a flat price (see radar/scoring/bot_volume.py)
     followup_idx                INTEGER,   -- position of the next follow-up checkpoint (config order)
-    followup_at                 REAL       -- when the follow-up loop should make that check; NULL = none left
+    followup_at                 REAL,      -- when the follow-up loop should make that check; NULL = none left
+    -- Retention decision, made once the 7d follow-up is in: 'kept' = full snapshots stay,
+    -- 'pruned' = snapshots deleted (token, outcome and follow-up rows stay). NULL = not decided yet.
+    retention                   TEXT,
+    retention_at                REAL,
+    peak_mcap                   REAL       -- highest market cap in the token's snapshots when that was decided
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);
@@ -186,6 +191,16 @@ CREATE TABLE IF NOT EXISTS followups (
     mcap            REAL,
     liquidity_usd   REAL,
     vol_h24         REAL,
+    -- The signal inputs at that moment. For tokens whose snapshots are later dropped
+    -- (see retention in settings.yaml), these rows are what remains of their history.
+    vol_m5          REAL,
+    vol_h1          REAL,
+    buys_m5         INTEGER,
+    sells_m5        INTEGER,
+    buys_h1         INTEGER,
+    sells_h1        INTEGER,
+    price_chg_m5    REAL,
+    price_chg_h1    REAL,
     PRIMARY KEY (mint, checkpoint)
 ) WITHOUT ROWID;
 
@@ -204,13 +219,13 @@ CREATE TABLE IF NOT EXISTS outcomes (
     max_drawdown_before_peak    REAL,   -- deepest fall from a high on the way to the peak, 0 to 1
     rugged                      INTEGER,
     dead_at_7d                  INTEGER,
-    label                       TEXT,   -- rug / dead / flat / runner / moonshot / no_data; NULL = cannot tell yet
+    peak                        TEXT,   -- moonshot / runner / flat, from the 24h peak; NULL = cannot tell yet
+    fate                        TEXT,   -- rugged / dead / alive at day 7; NULL = cannot tell yet
     final                       INTEGER NOT NULL DEFAULT 0,  -- 1 = the 7d checkpoint has passed; nothing more is coming
     complete                    INTEGER NOT NULL DEFAULT 0,  -- 1 = final and nothing is missing
     missing                     TEXT,   -- comma-separated fields we do not have (yet)
     computed_at                 REAL
 );
-CREATE INDEX IF NOT EXISTS idx_outcomes_label ON outcomes(label);
 
 CREATE TABLE IF NOT EXISTS meta (
     key             TEXT PRIMARY KEY,

@@ -10,9 +10,8 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from radar.context import Ctx
+from radar.db.store import FOLLOWUP_FIELDS
 from radar.lab.outcomes import compute_outcome
-
-SEEN_FIELDS = ("price_usd", "mcap", "liquidity_usd", "vol_h24")
 
 
 def checkpoints(cfg: Mapping[str, Any]) -> list[tuple[str, float]]:
@@ -59,7 +58,7 @@ def record(ctx: Ctx, row: dict[str, Any], now: float, *, looked_up: bool, found:
         elif not looked_up:
             break
         elif found and row.get("price_usd") is not None:
-            store.add_followup(mint, name, due, now, "done", {k: row.get(k) for k in SEEN_FIELDS})
+            store.add_followup(mint, name, due, now, "done", {k: row.get(k) for k in FOLLOWUP_FIELDS})
             counts["done"] += 1
         elif now < row["followup_at"]:
             break  # DexScreener has nothing yet; the follow-up loop asks once more before the window closes
@@ -77,6 +76,8 @@ def record(ctx: Ctx, row: dict[str, Any], now: float, *, looked_up: bool, found:
 
 
 def update_outcome(ctx: Ctx, row: Mapping[str, Any], now: float) -> None:
+    """Recompute a token's outcome from its snapshots. Never call this for a token whose
+    snapshots were pruned (token_state.retention = 'pruned'): the price history is gone."""
     store, mint = ctx.store, row["mint"]
     outcome = compute_outcome(
         store.price_points(mint),

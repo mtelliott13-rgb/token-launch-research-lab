@@ -96,3 +96,41 @@ def run(store: Store, cfg: Mapping[str, Any], now: float) -> dict[str, int] | No
         counts["tokens"], counts["with_price"], counts["backfilled"], counts["skipped"],
     )
     return counts
+
+
+SPLIT_KEY = "outcomes_split_at"
+ENRICH_KEY = "followups_enriched_at"
+
+
+def upgrade(store: Store, cfg: Mapping[str, Any], now: float) -> None:
+    """One-time changes to Phase 2 rows written by earlier versions. Each runs once per database."""
+    if not store.meta(SPLIT_KEY):
+        # The single label became two fields. Both follow from columns already stored, so no
+        # snapshots need re-reading. "flat" needs the 24 hours to be over, which is the case
+        # exactly when peak_multiple_24h is no longer listed as missing.
+        o = cfg["outcomes"]
+        with store.tx():
+            store.db.execute(
+                "UPDATE outcomes SET "
+                "peak = CASE WHEN peak_multiple_24h >= ? THEN 'moonshot' WHEN peak_multiple_24h >= ? THEN 'runner' "
+                "WHEN peak_multiple_24h IS NOT NULL AND instr(',' || COALESCE(missing, '') || ',', ',peak_multiple_24h,') = 0 "
+                "THEN 'flat' END, "
+                "fate = CASE WHEN rugged = 1 THEN 'rugged' WHEN dead_at_7d = 1 THEN 'dead' WHEN dead_at_7d = 0 THEN 'alive' END "
+                "WHERE peak IS NULL AND fate IS NULL",
+                (o["moonshot_multiple"], o["runner_multiple"]),
+            )
+            store.set_meta(SPLIT_KEY, str(now))
+        log.info("outcomes: label split into peak and fate")
+    if not store.meta(ENRICH_KEY):
+        # Checkpoint rows now also hold volume and buy/sell counts. Fill them in for rows
+        # written before that, from the DexScreener snapshot each one was taken from.
+        extra = ("vol_m5", "vol_h1", "buys_m5", "sells_m5", "buys_h1", "sells_h1", "price_chg_m5", "price_chg_h1")
+        with store.tx():
+            cur = store.db.execute(
+                f"UPDATE followups SET ({', '.join(extra)}) = (SELECT {', '.join(extra)} FROM snapshots s "
+                "WHERE s.mint = followups.mint AND s.source = 'dexscreener' AND s.ts <= followups.done_at "
+                "ORDER BY s.ts DESC LIMIT 1) WHERE done_at IS NOT NULL AND status IN ('done', 'backfilled') "
+                "AND buys_m5 IS NULL AND vol_m5 IS NULL"
+            )
+            store.set_meta(ENRICH_KEY, str(now))
+        log.info("follow-ups: volume and buy/sell figures added to %d existing checkpoint rows", cur.rowcount)

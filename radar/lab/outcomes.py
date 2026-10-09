@@ -9,18 +9,20 @@
   dead_at_7d                24h volume under dead_vol_h24_usd at day 7, or DexScreener no
                             longer lists the token then
 
-One label per token, first match wins:
-  moonshot   peak_multiple_24h >= moonshot_multiple
-  runner     peak_multiple_24h >= runner_multiple
-  rug        rugged
-  dead       dead_at_7d
-  flat       none of the above, once day 7 has passed
-  no_data    we never saw a price for it
-A runner or moonshot that later collapsed keeps its label and also has rugged = 1, so the
-label answers "was there something to catch" and the flag answers "did it end badly".
+Two verdicts per token, so a token that pumped and then rugged shows both:
 
-The label is provisional until `final` (the 7d checkpoint has passed): a runner can still
-become a moonshot, and "dead" and "flat" cannot be told before day 7. `missing` lists the
+  peak   how good the best moment was, from peak_multiple_24h
+           moonshot   >= moonshot_multiple
+           runner     >= runner_multiple
+           flat       below that, once the 24 hours are over
+  fate   how it ended
+           rugged     the rugged flag above, at any point
+           dead       dead_at_7d
+           alive      neither, at day 7
+
+Either is NULL while it cannot be told yet: "flat" needs the 24 hours to be over, and "dead"
+and "alive" need day 7. Both are provisional until `final` (the 7d checkpoint has passed): a
+runner can still become a moonshot, and anything can still be rugged. `missing` lists the
 fields we do not have, either not yet or because a check was skipped.
 
 The peak is only as fine-grained as our snapshots: a spike between two looks is not seen.
@@ -50,6 +52,14 @@ def fell_fast(series: Sequence[tuple[float, float]], drop: float, window_s: floa
     return False
 
 
+def _fate(rugged: bool, dead: bool | None) -> str | None:
+    if rugged:
+        return "rugged"
+    if dead is None:
+        return None
+    return "dead" if dead else "alive"
+
+
 def compute_outcome(
     points: Sequence[tuple[float, float, float | None]],
     checks: Mapping[str, Mapping[str, Any]],
@@ -64,10 +74,18 @@ def compute_outcome(
     follow-up checkpoint name to its row (status, price_usd, vol_h24).
     """
     final = FINAL_CHECKPOINT in checks
-    out: dict[str, Any] = {"final": int(final), "complete": 0, "computed_at": now, "label": None}
+    out: dict[str, Any] = {"final": int(final), "complete": 0, "computed_at": now, "peak": None, "fate": None}
+
+    dead = None
+    last = checks.get(FINAL_CHECKPOINT)
+    if last and last["status"] in HAS_FIGURES:
+        dead = (last.get("vol_h24") or 0.0) < cfg["dead_vol_h24_usd"]
+    elif last and last["status"] == "no_data":
+        dead = True
+
     points = [p for p in points if p[1] and p[1] > 0]
-    if not points:
-        out.update(label="no_data" if final else None, missing="p0")
+    if not points:  # never priced: there is no peak to speak of, but it can still have a fate
+        out.update(fate=_fate(rugcheck_rugged, dead), missing="p0")
         return out
 
     p0_ts, p0 = points[0][0], points[0][1]
@@ -108,26 +126,17 @@ def compute_outcome(
     )
     out["rugged"] = int(rugged)
 
-    dead = None
-    last = checks.get(FINAL_CHECKPOINT)
-    if last and last["status"] in HAS_FIGURES:
-        dead = (last.get("vol_h24") or 0.0) < cfg["dead_vol_h24_usd"]
-    elif last and last["status"] == "no_data":
-        dead = True
     out["dead_at_7d"] = None if dead is None else int(dead)
     if dead is None:
         missing.append("dead_at_7d")
 
     if peak_multiple >= cfg["moonshot_multiple"]:
-        out["label"] = "moonshot"
+        out["peak"] = "moonshot"
     elif peak_multiple >= cfg["runner_multiple"]:
-        out["label"] = "runner"
-    elif rugged:
-        out["label"] = "rug"
-    elif dead:
-        out["label"] = "dead"
-    elif final and dead is False:
-        out["label"] = "flat"
+        out["peak"] = "runner"
+    elif PEAK_CHECKPOINT in checks:
+        out["peak"] = "flat"
+    out["fate"] = _fate(rugged, dead)
 
     out["missing"] = ",".join(missing) or None
     out["complete"] = int(final and not missing)
