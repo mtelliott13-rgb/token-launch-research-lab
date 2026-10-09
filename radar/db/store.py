@@ -11,11 +11,8 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 
 ROW_SQL = "SELECT t.*, s.* FROM tokens t JOIN token_state s ON s.mint = t.mint"
 
-# A token counts as graduated once it migrated or trades on something other than the pump.fun curve.
-GRADUATED_SQL = (
-    "(s.migrated_at IS NOT NULL OR "
-    "(t.dex_id IS NOT NULL AND REPLACE(t.dex_id, '-', '') != 'pumpfun'))"
-)
+# Must match radar.view.is_graduated: we saw it migrate, or it has a real liquidity pool.
+GRADUATED_SQL = "(s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL)"
 
 
 class Store:
@@ -200,6 +197,9 @@ class Store:
             (limit,),
         )
         return [dict(r) for r in cur]
+
+    def watched(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.db.execute(f"{ROW_SQL} WHERE s.watched = 1 ORDER BY t.created_at DESC")]
 
     def clear_stale_trending(self, before: float) -> None:
         self.db.execute(

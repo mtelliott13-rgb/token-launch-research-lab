@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     price_usd       REAL,
     mcap            REAL,
     fdv             REAL,
-    liquidity_usd   REAL,          -- NULL while a token is still on a bonding curve
+    liquidity_usd   REAL,          -- source=dexscreener: pool liquidity, NULL on a bonding curve;
+                                   -- source=gecko: reserve_in_usd, which can include curve reserves
     vol_m5          REAL,
     vol_h1          REAL,
     vol_h6          REAL,
@@ -122,7 +123,7 @@ CREATE TABLE IF NOT EXISTS token_state (
     price_usd                   REAL,
     mcap                        REAL,
     fdv                         REAL,
-    liquidity_usd               REAL,
+    liquidity_usd               REAL,   -- from DexScreener only; NULL means still on a bonding curve
     vol_m5                      REAL,
     vol_h1                      REAL,
     vol_h24                     REAL,
