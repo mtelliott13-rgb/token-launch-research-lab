@@ -4,13 +4,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any, Awaitable, Callable
 
 from radar.context import Ctx
+from radar.faillog import FailureLog
+from radar.scoring.bot_volume import likely_bot_volume
 from radar.scoring.momentum import is_eligible, momentum
 from radar.view import view_row
 
 log = logging.getLogger(__name__)
+failures = FailureLog(log)
 
 # Snapshot fields mirrored into token_state for the dashboard.
 STATE_SNAP_FIELDS = (
@@ -59,11 +63,14 @@ def apply_snapshot(
     started = max(row.get("created_at") or 0, row.get("migrated_at") or 0)
     age_min = (now - started) / 60 if started else None
     scored = momentum(row, age_min, ctx.cfg["momentum"]) if is_eligible(row, age_min, ctx.cfg["rising"]) else _NO_SCORE
-    row.update(scored, snapshot_ts=now, snapshot_source=source, snap_sig=sig, last_checked_at=now, miss_count=0)
+    bot = likely_bot_volume(row, ctx.cfg["bot_volume"])
+    bot = None if bot is None else int(bot)
+    row.update(scored, bot_volume=bot, snapshot_ts=now, snapshot_source=source, snap_sig=sig, last_checked_at=now, miss_count=0)
     ctx.store.update_state(
         mint,
         **latest,
         **scored,
+        bot_volume=bot,
         snapshot_ts=now,
         snapshot_source=source,
         snap_sig=sig,
@@ -82,13 +89,16 @@ async def supervise(name: str, ctx: Ctx, fn: Callable[[Ctx], Awaitable[None]]) -
     """Run a collector forever, restarting it with backoff if it ever crashes."""
     delay = 1.0
     while True:
+        started = time.monotonic()
         try:
             await fn(ctx)
             log.warning("collector %s returned unexpectedly; restarting", name)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a collector must never take the app down
-            log.exception("collector %s crashed; restarting in %.0fs", name, delay)
+            if time.monotonic() - started > 300:
+                failures.ok(name)  # it ran fine for a while, so this is a new problem
+            failures.failed(name, f"collector {name} crashed ({type(exc).__name__}: {exc}); restarting with backoff", exc_info=True)
             ctx.health.error(name.split(":")[0], f"crashed: {exc}")
         await asyncio.sleep(delay + random.uniform(0, 1))
         delay = min(delay * 2, 60.0)

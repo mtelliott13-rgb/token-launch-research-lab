@@ -23,7 +23,7 @@ _VIEW_FIELDS = (
     "boosts_active", "boost_total", "score", "vol_accel", "buy_pressure", "txn_growth",
     "migrated_at", "trending_rank", "watched", "profile_seen_at", "safety_ts",
     "mint_authority_enabled", "freeze_authority_enabled", "top10_pct", "top_holder_pct",
-    "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged",
+    "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged", "total_holders", "bot_volume",
 )
 
 
@@ -60,6 +60,8 @@ def is_graduated(row: Mapping[str, Any]) -> bool:
 def view_row(row: Mapping[str, Any], now: float) -> dict[str, Any]:
     out = {k: row.get(k) for k in _VIEW_FIELDS}
     out["graduated"] = is_graduated(row)
+    # We asked RugCheck and it has nothing, which is different from never having asked.
+    out["no_rugcheck_report"] = row.get("safety_ts") is None and bool(row.get("safety_miss_count"))
     boost_seen = row.get("boost_seen_at")
     out["paid_boost"] = bool(row.get("boosts_active")) or (
         boost_seen is not None and now - boost_seen < PAID_BOOST_WINDOW_S

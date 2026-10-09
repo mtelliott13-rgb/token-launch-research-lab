@@ -18,11 +18,13 @@ from typing import Any, Iterable
 
 from radar.collectors.common import apply_snapshot, publish_tokens, to_float, to_int
 from radar.context import Ctx
+from radar.faillog import FailureLog
 from radar.http import SourceError
 from radar.scoring.schedule import next_refresh_delay
 from radar.view import SOL_MINT, clean_text, clean_url, is_mint
 
 log = logging.getLogger(__name__)
+failures = FailureLog(log)
 
 NAME = "dexscreener"
 PROMO_NAME = "dexscreener_promo"
@@ -181,8 +183,9 @@ async def refresh_loop(ctx: Ctx) -> None:
             if backlog > per_cycle and time.time() - last_backlog_log > 60:
                 last_backlog_log = time.time()
                 log.warning("dexscreener: %d tokens waiting for a refresh (rate limit budget)", backlog)
+            failures.ok("dexscreener refresh")
         except SourceError as exc:
-            log.warning("dexscreener refresh failed: %s", exc)
+            failures.failed("dexscreener refresh", f"dexscreener refresh failed: {exc}")
         await asyncio.sleep(cfg["cycle_s"])
 
 
@@ -228,8 +231,9 @@ async def promo_loop(ctx: Ctx) -> None:
                 items = await ctx.dex_promo.get_json(cfg["base_url"] + path)
                 now = time.time()
                 publish_tokens(ctx, ingest_promo(ctx, kind, items, seen, now), now)
+                failures.ok(f"dexscreener {path}")
             except SourceError as exc:
-                log.warning("dexscreener %s feed failed: %s", kind, exc)
+                failures.failed(f"dexscreener {path}", f"dexscreener {kind} feed {path} failed: {exc}")
         if len(seen) > 20_000:
             seen.clear()
         await asyncio.sleep(min(cfg["profiles_poll_s"], cfg["boosts_poll_s"]))

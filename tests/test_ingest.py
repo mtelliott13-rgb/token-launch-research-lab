@@ -238,3 +238,113 @@ def test_pumpportal_reconnects_after_the_connection_drops():
     assert all(subs == ["subscribeNewToken", "subscribeMigration"] for subs in connections)
     health = ctx.health.snapshot()["pumpportal"]
     assert health["error_count"] >= 2 and health["detail"]["reconnects"] >= 2
+
+
+def test_rugcheck_no_report_is_remembered_and_retried_with_backoff(monkeypatch):
+    """A 400 must not be re-requested on every Rising pass: 10 min, then 1 hour, then never."""
+    calls = []
+    clock = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(400, json={"error": "not found"})
+
+    async def attempt(ctx):
+        ctx.safety.request(FRANK, priority=1)   # what the Rising loop does every 10 seconds
+        if not ctx.safety._queue.empty():
+            task = asyncio.ensure_future(ctx.safety.run())
+            await asyncio.sleep(0.01)
+            task.cancel()
+        with pytest.raises(SourceError) as err:  # and what opening the drawer does
+            await ctx.safety.get(FRANK)
+        assert err.value.status == 400
+
+    async def flow(ctx):
+        ctx.store.upsert_token(FRANK, source="gecko", first_seen_at=clock[0])
+        seen = []
+        for advance in (0, 10, 590, 10, 3500, 200, 86400 * 30):
+            clock[0] += advance
+            await attempt(ctx)
+            seen.append(len(calls))
+        return seen
+
+    seen, ctx, events = run(handler, flow)
+    # first ask; 10s later nothing; after 10 min a second; nothing; nothing; after 1 hour a third; then never
+    assert seen == [1, 1, 2, 2, 2, 3, 3]
+    row = ctx.store.row(FRANK)
+    assert row["safety_miss_count"] == 3 and row["safety_retry_at"] is None and row["safety_ts"] is None
+    assert events[-1][1][0]["no_rugcheck_report"] is True
+
+
+def test_rugcheck_report_arriving_later_clears_the_no_report_state(monkeypatch):
+    clock = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    answers = [httpx.Response(400, json={"error": "not found"}), httpx.Response(200, json=RUGCHECK)]
+
+    async def flow(ctx):
+        ctx.store.upsert_token(FRANK, source="gecko", first_seen_at=clock[0])
+        with pytest.raises(SourceError):
+            await ctx.safety.get(FRANK)
+        clock[0] += 601
+        return await ctx.safety.get(FRANK)
+
+    report, ctx, events = run(lambda request: answers.pop(0), flow)
+    row = ctx.store.row(FRANK)
+    assert report["top10_pct"] == 5.41 and row["safety_miss_count"] == 0 and row["safety_retry_at"] is None
+    assert row["total_holders"] == RUGCHECK["totalHolders"]
+    assert events[-1][1][0]["no_rugcheck_report"] is False
+
+
+def test_rugcheck_gives_up_at_once_on_an_address_that_is_not_a_mint():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(400, json={"error": "invalid token mint"})
+
+    async def flow(ctx):
+        ctx.store.upsert_token(POOL, source="gecko", first_seen_at=time.time())
+        with pytest.raises(SourceError):
+            await ctx.safety.get(POOL)
+
+    _, ctx, _ = run(handler, flow)
+    row = ctx.store.row(POOL)
+    assert len(calls) == 1 and row["safety_miss_count"] == 1 and row["safety_retry_at"] is None
+
+
+def test_rugcheck_unreachable_leaves_the_token_alone_for_a_while(monkeypatch):
+    calls = []
+    clock = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(503)
+
+    async def flow(ctx):
+        ctx.store.upsert_token(FRANK, source="gecko", first_seen_at=clock[0])
+        for advance in (0, 10, 200):
+            clock[0] += advance
+            with pytest.raises(SourceError) as err:
+                await ctx.safety.get(FRANK)
+            assert err.value.status is None
+            ctx.safety.request(FRANK, priority=1)
+        return ctx.safety._queue.qsize()
+
+    queued, ctx, _ = run(handler, flow)
+    assert len(calls) == 2 and queued == 0
+    assert ctx.store.row(FRANK)["safety_miss_count"] == 0   # an outage is not "no report"
+
+
+def test_bot_volume_flag_is_set_from_the_snapshot():
+    busy_flat = {**DEX_GRADUATED, "txns": {**DEX_GRADUATED["txns"], "h1": {"buys": 400, "sells": 390}},
+                 "priceChange": {"m5": 0.1, "h1": -0.4, "h6": 1.0, "h24": 1.0}}
+    mint = busy_flat["baseToken"]["address"]
+
+    async def flow(ctx):
+        ctx.store.upsert_token(mint, source="gecko", first_seen_at=time.time())
+        await dexscreener.refresh_batch(ctx, [ctx.store.row(mint)])
+
+    _, ctx, events = run(lambda request: httpx.Response(200, json=[busy_flat]), flow)
+    assert ctx.store.row(mint)["bot_volume"] == 1 and events[-1][1][0]["bot_volume"] == 1

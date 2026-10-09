@@ -40,6 +40,8 @@ sources:
     recheck_s: 1800             # re-check tokens that stay on the Rising list
     rising_top_n: 25            # how many Rising tokens get a safety check
     max_queue: 200
+    no_report_retry_s: [600, 3600]  # RugCheck has no report: ask again after 10 min, then 1 hour, then stop
+    error_retry_s: 120          # RugCheck unreachable: leave that token alone for this long
 
 # How often each token's pair data is re-fetched from DexScreener (seconds).
 # A token that matches no rule stops being refreshed (Phase 2 adds follow-up snapshots).
@@ -70,6 +72,13 @@ momentum:
     txn_growth: 0.3
   volume_floor_usd: 100         # floor for hourly volume, avoids divide-by-tiny
   txn_floor: 1                  # floor for the average 5-minute transaction count
+
+# "Likely bot volume" flag: many trades in the last hour while the price went nowhere.
+# Version 0, not yet tested against outcomes. Percentages are DexScreener's price change figures.
+bot_volume:
+  min_txns_h1: 300
+  max_abs_price_chg_h1: 1.0
+  max_abs_price_chg_m5: 1.0
 
 rising:
   min_liquidity_usd: 10000      # for tokens with a liquidity pool

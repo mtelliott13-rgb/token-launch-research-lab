@@ -157,7 +157,13 @@ CREATE TABLE IF NOT EXISTS token_state (
     lp_locked_pct               REAL,
     risk_score                  REAL,
     risk_score_normalised       REAL,
-    rugged                      INTEGER
+    rugged                      INTEGER,
+    total_holders               INTEGER,   -- from the latest RugCheck report
+    -- RugCheck answered "no report" (HTTP 4xx) this many times in a row; 0 after a success.
+    safety_miss_count           INTEGER NOT NULL DEFAULT 0,
+    safety_miss_at              REAL,
+    safety_retry_at             REAL,      -- when to ask again; NULL with misses > 0 means we stopped asking
+    bot_volume                  INTEGER    -- 1 = many trades but a flat price (see radar/scoring/bot_volume.py)
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);

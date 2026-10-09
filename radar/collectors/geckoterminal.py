@@ -22,10 +22,12 @@ from typing import Any
 
 from radar.collectors.common import apply_snapshot, publish_tokens, to_float, to_int
 from radar.context import Ctx
+from radar.faillog import FailureLog
 from radar.http import SourceError
 from radar.view import QUOTE_MINTS, SOL_MINT, clean_text, clean_url, is_mint
 
 log = logging.getLogger(__name__)
+failures = FailureLog(log)
 
 NAME = "geckoterminal"
 # Don't overwrite DexScreener data newer than this with GeckoTerminal's.
@@ -159,8 +161,9 @@ async def poll_loop(ctx: Ctx, kind: str) -> None:
             mints = ingest_pools(ctx, parse_pools(payload), trending=kind == "trending_pools", now=now)
             ctx.health.note(NAME, **{f"{kind}_count": len(mints)}, **ctx.gecko.stats())
             publish_tokens(ctx, mints, now)
+            failures.ok(f"geckoterminal {kind}")
         except SourceError as exc:
-            log.warning("geckoterminal %s failed: %s", kind, exc)
+            failures.failed(f"geckoterminal {kind}", f"geckoterminal {kind} failed: {exc}")
         await asyncio.sleep(interval)
 
 

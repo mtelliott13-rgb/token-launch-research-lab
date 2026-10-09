@@ -1,13 +1,13 @@
 # Progress
 
-Last updated: 2026-10-08, end of the first session.
+Last updated: 2026-10-09, after the first 20-hour run.
 
 ## Start the dashboard
 
 In a terminal:
 
 ```
-cd ~/Documents/meme-radar
+cd ~/meme-radar
 uv run python -m radar
 ```
 
@@ -33,8 +33,26 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 50 tests passing (`uv run pytest`).
+- 61 tests passing (`.venv/bin/python -m pytest`; see environment notes).
 - Structured logs in `data/logs/radar.log`.
+
+## Fixed after the first 20-hour run (2026-10-09)
+
+- **RugCheck retry loop.** The Rising list asked for a safety check on every 10-second pass for
+  any token without a saved report, and a refused request saved nothing, so one token was
+  re-requested 92 times in 51 minutes. A "no report" answer (HTTP 400) is now saved per token
+  and retried after 10 minutes, then 1 hour, then not at all. An address RugCheck calls
+  "invalid token mint" is dropped after one try. If RugCheck is unreachable, the token is left
+  alone for 2 minutes. The dashboard shows "No RugCheck report" instead of "Unchecked".
+- **Pool addresses.** Checked the database: none of the addresses sent to RugCheck is a pool,
+  pair or bonding-curve address. The token in the loop is a real mint that RugCheck does not know.
+- **Logging.** A failure that repeats is logged once, then one line with the count every
+  10 minutes, then one line when it recovers (`radar/faillog.py`).
+- **Holders column** on New launches and Rising, from the latest RugCheck report, so it is
+  empty for tokens that have not had a safety check.
+- **"Likely bot volume" badge**, version 0: at least 300 trades in the last hour with the price
+  within 1% over both the last hour and the last 5 minutes. Thresholds in `config/settings.yaml`.
+  It also marks large, stable tokens (USDC, JUP, PUMP), which are busy and flat for honest reasons.
 
 ## Left in Phase 1
 
@@ -80,5 +98,9 @@ table (Phase 3), the `outcomes` table and follow-up snapshots (Phase 2).
 ## Environment notes
 
 - uv is installed at `~/.local/bin/uv`. Project libraries are in `.venv/`.
+- The folder was moved from `~/Documents/meme-radar` to `~/meme-radar`. The app starts fine, but
+  `uv run pytest` now picks up the wrong Python, because the test launcher inside `.venv/` still
+  points at the old location. Use `.venv/bin/python -m pytest`. Rebuilding `.venv/` would fix it;
+  do that only while the collector is stopped.
 - Git name and email are set for this project only (in `.git/config`).
 - The working rules for this project are in `CLAUDE.md` under "Working rules".

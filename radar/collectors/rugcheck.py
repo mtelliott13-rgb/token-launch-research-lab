@@ -8,6 +8,10 @@ lpLockedPct, so we use the full report, /tokens/{mint}/report:
    marketType, liquidityAAccount, liquidityBAccount, lp{baseUSD, quoteUSD, lpLockedUSD,
    lpLockedPct}}], risks[{name, value, description, score, level}], score, score_normalised,
    rugged, totalHolders, graphInsidersDetected, ...}
+Verified 2026-10-09: when it has nothing it answers HTTP 400, not 404:
+  {"error": "not found"}           a real token it has no report for (often only for the
+                                   first seconds after a graduation, sometimes for good)
+  {"error": "invalid token mint"}  the address is not a token mint (e.g. a pool address)
 The largest "holder" is usually the liquidity pool or bonding curve itself, so
 those accounts are left out of the holder-concentration figures.
 """
@@ -22,17 +26,20 @@ from typing import Any
 
 from radar.collectors.common import publish_tokens, to_float, to_int
 from radar.context import Ctx
+from radar.faillog import FailureLog
 from radar.http import SourceError
 
 log = logging.getLogger(__name__)
+failures = FailureLog(log)
 
 NAME = "rugcheck"
 _NO_AUTHORITY = {"", "11111111111111111111111111111111"}
 # Fields copied onto token_state for list views and filters.
 STATE_FIELDS = (
     "mint_authority_enabled", "freeze_authority_enabled", "top10_pct", "top_holder_pct",
-    "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged",
+    "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged", "total_holders",
 )
+_CLEAR_MISSES = {"safety_miss_count": 0, "safety_miss_at": None, "safety_retry_at": None}
 
 
 # ---- parsing (pure) --------------------------------------------------------
@@ -98,6 +105,15 @@ def parse_report(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def no_report_note(misses: int, retry_at: float | None, now: float) -> str:
+    """What the token drawer says when RugCheck has no report."""
+    if not misses:
+        return "RugCheck has no report for this token yet."
+    if retry_at is None:
+        return f"RugCheck has no report for this token. We asked {misses} time{'s' if misses != 1 else ''} and have stopped asking."
+    return f"RugCheck has no report for this token. We will ask again in about {max(1, round((retry_at - now) / 60))} min."
+
+
 # ---- service ---------------------------------------------------------------
 
 class SafetyService:
@@ -110,15 +126,25 @@ class SafetyService:
         self._queued: set[str] = set()
         self._seq = itertools.count()
         self._inflight: dict[str, asyncio.Task] = {}
+        self._cooldown: dict[str, float] = {}  # mint -> earliest retry after a failed request
         self.skipped = 0
 
     def _fresh(self, mint: str, max_age: float) -> dict[str, Any] | None:
         latest = self.ctx.store.latest_safety(mint)
         return latest if latest and time.time() - latest["ts"] < max_age else None
 
+    def _may_ask(self, mint: str, now: float) -> bool:
+        """False while a token is waiting out a "no report" answer or a failed request."""
+        if self._cooldown.get(mint, 0.0) > now:
+            return False
+        misses, retry_at = self.ctx.store.safety_misses(mint)
+        return misses == 0 or (retry_at is not None and retry_at <= now)
+
     def request(self, mint: str, priority: int) -> None:
         """Queue a background check. Lower priority number = sooner."""
-        if mint in self._queued:
+        # Callers ask again on every pass for as long as a token has no report, so a token
+        # RugCheck just turned down must be refused here or it is re-requested every few seconds.
+        if mint in self._queued or not self._may_ask(mint, time.time()):
             return
         if self._queue.qsize() >= self.cfg["max_queue"]:
             self.skipped += 1
@@ -129,8 +155,18 @@ class SafetyService:
         self._queue.put_nowait((priority, next(self._seq), mint))
 
     async def get(self, mint: str) -> dict[str, Any] | None:
-        """Latest report for a token, fetching one now if ours is missing or old."""
-        return self._fresh(mint, self.cfg["cache_s"]) or await self._fetch(mint)
+        """Latest report for a token, fetching one now if ours is missing or old.
+
+        Raises SourceError without asking RugCheck while the token is waiting out an earlier
+        "no report" answer (status 400) or failed request (no status).
+        """
+        fresh = self._fresh(mint, self.cfg["cache_s"])
+        if fresh:
+            return fresh
+        if not self._may_ask(mint, time.time()):
+            misses, _ = self.ctx.store.safety_misses(mint)
+            raise SourceError(f"rugcheck: not asking about {mint} again yet", 400 if misses else None)
+        return await self._fetch(mint)
 
     async def _fetch(self, mint: str) -> dict[str, Any] | None:
         task = self._inflight.get(mint)
@@ -142,25 +178,53 @@ class SafetyService:
 
     async def _fetch_once(self, mint: str) -> dict[str, Any] | None:
         ctx = self.ctx
-        report = await ctx.rugcheck.get_json(f"{self.cfg['base_url']}/tokens/{mint}/report")
+        try:
+            report = await ctx.rugcheck.get_json(f"{self.cfg['base_url']}/tokens/{mint}/report")
+        except SourceError as exc:
+            if exc.status is not None:
+                self._no_report(mint, exc)
+            else:
+                if len(self._cooldown) > 5000:
+                    self._cooldown.clear()
+                self._cooldown[mint] = time.time() + self.cfg["error_retry_s"]
+                failures.failed(NAME, f"rugcheck: request failed ({exc})")
+            raise
+        failures.ok(NAME)
+        self._cooldown.pop(mint, None)
         if not isinstance(report, dict):
             return None
         parsed, now = parse_report(report), time.time()
         with ctx.store.tx():
             ctx.store.add_safety(mint, now, parsed)
-            ctx.store.update_state(mint, safety_ts=now, **{k: parsed[k] for k in STATE_FIELDS})
+            ctx.store.update_state(mint, safety_ts=now, **_CLEAR_MISSES, **{k: parsed[k] for k in STATE_FIELDS})
         publish_tokens(ctx, [mint], now)
         return ctx.store.latest_safety(mint)
+
+    def _no_report(self, mint: str, exc: SourceError) -> None:
+        """RugCheck turned the request down (HTTP 4xx): remember it and schedule the next try."""
+        now, delays = time.time(), self.cfg["no_report_retry_s"]
+        misses = self.ctx.store.safety_misses(mint)[0] + 1
+        not_a_mint = "invalid token mint" in exc.body
+        wait = delays[misses - 1] if misses <= len(delays) and not not_a_mint else None
+        self.ctx.store.update_state(
+            mint, safety_miss_count=misses, safety_miss_at=now, safety_retry_at=now + wait if wait else None
+        )
+        publish_tokens(self.ctx, [mint], now)
+        plan = f"asking again in {wait / 60:.0f} min" if wait else "not asking again"
+        if not_a_mint:
+            log.warning("rugcheck: %s is not a token mint (%s); %s", mint, exc.body, plan)
+        else:
+            log.info("rugcheck: no report for %s (HTTP %s %s), attempt %d; %s", mint, exc.status, exc.body, misses, plan)
 
     async def run(self, _ctx: Ctx | None = None) -> None:
         while True:
             _, _, mint = await self._queue.get()
             self._queued.discard(mint)
             try:
-                if not self._fresh(mint, self.cfg["cache_s"]):
+                if self._may_ask(mint, time.time()) and not self._fresh(mint, self.cfg["cache_s"]):
                     await self._fetch(mint)
-            except SourceError as exc:
-                log.info("rugcheck: no report for %s (%s)", mint, exc)
+            except SourceError:
+                pass  # recorded and logged where it happened, in _fetch_once
             except Exception as exc:  # noqa: BLE001 - one odd report must not stop the queue
                 log.exception("rugcheck: could not process the report for %s", mint)
                 self.ctx.health.error(NAME, f"bad report: {exc}")

@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from radar import rising
 from radar.collectors import dexscreener, geckoterminal, pumpportal
 from radar.collectors.common import publish_tokens, supervise
-from radar.collectors.rugcheck import SafetyService
+from radar.collectors.rugcheck import SafetyService, no_report_note
 from radar.config import ROOT, load_settings
 from radar.context import Ctx
 from radar.db.store import Store
@@ -180,7 +180,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         except asyncio.TimeoutError:
             return {"safety": safety_view(ctx.store.latest_safety(mint)), "note": "RugCheck is slow right now; showing what we have."}
         except SourceError as exc:
-            note = "RugCheck has no report for this token yet." if exc.status else "RugCheck could not be reached."
+            note = no_report_note(*ctx.store.safety_misses(mint), time.time()) if exc.status else "RugCheck could not be reached."
             return {"safety": safety_view(ctx.store.latest_safety(mint)), "note": note}
         except Exception:  # noqa: BLE001 - an unreadable report should not break the drawer
             log.exception("could not process the safety report for %s", mint)

@@ -50,3 +50,25 @@ def test_unknown_column_is_rejected():
     except ValueError:
         return
     raise AssertionError("expected ValueError")
+
+
+def test_older_database_gets_new_columns_and_holder_counts(tmp_path):
+    """A database made before these columns existed is upgraded in place on start."""
+    from radar.db.store import ADDED_COLUMNS
+
+    path = tmp_path / "old.db"
+    s = Store(path)
+    s.upsert_token("M1", source="gecko", first_seen_at=1.0)
+    s.add_safety("M1", 5.0, {"total_holders": 10})
+    s.add_safety("M1", 9.0, {"total_holders": 42})
+    s.update_state("M1", safety_ts=9.0)
+    for column in ADDED_COLUMNS["token_state"]:
+        s.db.execute(f"ALTER TABLE token_state DROP COLUMN {column}")
+    s.close()
+
+    s = Store(path)
+    row = s.row("M1")
+    assert row["total_holders"] == 42 and row["safety_miss_count"] == 0 and row["bot_volume"] is None
+    assert s.safety_misses("M1") == (0, None)
+    s.close()
+    Store(path).close()  # starting again changes nothing

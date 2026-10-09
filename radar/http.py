@@ -24,9 +24,10 @@ MAX_CACHE_ENTRIES = 500
 class SourceError(Exception):
     """A request failed for good (after retries, or with a non-retryable status)."""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, body: str = ""):
         super().__init__(message)
         self.status = status
+        self.body = body  # start of the response to a rejected request; it usually says why
 
 
 class SourceClient:
@@ -106,7 +107,8 @@ class SourceClient:
                 continue
             if resp.status_code >= 400:
                 # Our request was wrong for this resource (e.g. unknown pool); retrying won't help.
-                raise SourceError(f"{self.name}: HTTP {resp.status_code} for {url}", resp.status_code)
+                body = " ".join(resp.text[:200].split())
+                raise SourceError(f"{self.name}: HTTP {resp.status_code} for {url}", resp.status_code, body)
 
             try:
                 data = resp.json()

@@ -14,6 +14,18 @@ ROW_SQL = "SELECT t.*, s.* FROM tokens t JOIN token_state s ON s.mint = t.mint"
 # Must match radar.view.is_graduated: we saw it migrate, or it has a real liquidity pool.
 GRADUATED_SQL = "(s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL)"
 
+# Columns added to schema.sql after databases already existed. CREATE TABLE IF NOT EXISTS
+# leaves an existing table as it is, so older databases get these added on start.
+ADDED_COLUMNS = {
+    "token_state": {
+        "total_holders": "INTEGER",
+        "safety_miss_count": "INTEGER NOT NULL DEFAULT 0",
+        "safety_miss_at": "REAL",
+        "safety_retry_at": "REAL",
+        "bot_volume": "INTEGER",
+    },
+}
+
 
 class Store:
     def __init__(self, path: str | Path):
@@ -25,6 +37,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA.read_text())
+        self._migrate()
         self._cols = {
             table: {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
             for table in ("tokens", "token_state", "snapshots", "safety")
@@ -32,6 +45,21 @@ class Store:
 
     def close(self) -> None:
         self.db.close()
+
+    def _migrate(self) -> None:
+        added = set()
+        for table, columns in ADDED_COLUMNS.items():
+            have = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for name, decl in columns.items():
+                if name not in have:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                    added.add(name)
+        if "total_holders" in added:
+            # Holder counts were already being saved with each safety report; copy the latest over.
+            self.db.execute(
+                "UPDATE token_state SET total_holders = (SELECT total_holders FROM safety "
+                "WHERE safety.mint = token_state.mint ORDER BY ts DESC LIMIT 1) WHERE safety_ts IS NOT NULL"
+            )
 
     @contextmanager
     def tx(self):
@@ -129,6 +157,13 @@ class Store:
             "SELECT * FROM safety WHERE mint = ? ORDER BY ts DESC LIMIT 1", (mint,)
         ).fetchone()
         return dict(row) if row else None
+
+    def safety_misses(self, mint: str) -> tuple[int, float | None]:
+        """("no report" answers in a row, when to ask RugCheck again or None if we stopped asking)."""
+        row = self.db.execute(
+            "SELECT safety_miss_count, safety_retry_at FROM token_state WHERE mint = ?", (mint,)
+        ).fetchone()
+        return (row[0], row[1]) if row else (0, None)
 
     # ---- reads ------------------------------------------------------------
 

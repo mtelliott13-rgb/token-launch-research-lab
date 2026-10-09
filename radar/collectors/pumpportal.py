@@ -25,9 +25,11 @@ import websockets
 
 from radar.collectors.common import publish_tokens, to_float
 from radar.context import Ctx
+from radar.faillog import FailureLog
 from radar.view import clean_text, clean_url, is_mint
 
 log = logging.getLogger(__name__)
+failures = FailureLog(log)
 
 NAME = "pumpportal"
 # The python.org macOS build has no root certificates wired up, so use certifi's.
@@ -121,6 +123,7 @@ async def run(ctx: Ctx) -> None:
                 await ws.send(json.dumps({"method": "subscribeNewToken"}))
                 await ws.send(json.dumps({"method": "subscribeMigration"}))
                 log.info("pumpportal connected")
+                failures.ok(NAME)
                 ctx.health.ok(NAME, connected=True, reconnects=reconnects)
                 while True:
                     # New tokens arrive every couple of seconds; long silence means a dead link.
@@ -134,7 +137,7 @@ async def run(ctx: Ctx) -> None:
             raise
         except Exception as exc:  # noqa: BLE001 - any failure here means "reconnect"
             reason = "no messages (stale connection)" if isinstance(exc, asyncio.TimeoutError) else f"{type(exc).__name__}: {exc}"
-            log.warning("pumpportal disconnected (%s); reconnecting in %.0fs", reason, backoff)
+            failures.failed(NAME, f"pumpportal disconnected ({reason}); reconnecting with backoff")
             ctx.health.error(NAME, reason)
             ctx.health.note(NAME, connected=False)
         reconnects += 1
