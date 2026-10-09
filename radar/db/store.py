@@ -271,8 +271,11 @@ class Store:
     def peak_mcap(self, mint: str) -> float | None:
         return self.db.execute("SELECT MAX(mcap) FROM snapshots WHERE mint = ?", (mint,)).fetchone()[0]
 
-    def delete_snapshots(self, mint: str) -> int:
-        return self.db.execute("DELETE FROM snapshots WHERE mint = ?", (mint,)).rowcount
+    def delete_snapshots(self, mint: str, after: float | None = None) -> int:
+        """Delete a token's snapshots: all of them, or only those later than `after`."""
+        return self.db.execute(
+            "DELETE FROM snapshots WHERE mint = ? AND ts > ?", (mint, after if after is not None else -1.0)
+        ).rowcount
 
     def meta(self, key: str) -> str | None:
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()

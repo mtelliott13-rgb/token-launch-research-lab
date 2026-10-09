@@ -112,24 +112,28 @@ Things to know about Phase 2 data:
   prices from pools with almost no liquidity, not something anyone could have traded. Phase 4
   needs a liquidity filter before these are counted as wins.
 
-## Data retention (added 2026-10-09)
+## Data retention (added 2026-10-09, three tiers)
 
-- Once a token is 7 days old and its outcome is final, it is judged once. Snapshots are kept in
-  full if it graduated, reached a $30,000 market cap, or is watched. Otherwise its snapshots are
-  deleted; the token, its outcome, its follow-up checkpoint rows, its raw launch event and its
-  safety reports stay. Code: `radar/lab/retention.py`; settings under `retention:`.
-- Follow-up checkpoint rows now also hold 5-minute and 1-hour volume, buys, sells and price
-  change, because for dropped tokens those rows are all that is left of their history.
-- Measured on a copy of one day of data: about 11% of tokens are kept and they hold about 42% of
-  the snapshot rows; the database went from 248 MB to 171 MB.
-- Expected growth: about 2.1 GB a week without retention, about 1.5 GB a week with it. The first
-  week still grows at the full rate, because nothing is 7 days old until 2026-10-15. The file
-  never shrinks; freed space is reused.
-- What is left after retention, per day: kept snapshots about 65 MB, checkpoint rows about
-  47 MB, token rows about 35 MB, raw launch events about 32 MB, safety reports about 22 MB,
-  outcomes about 10 MB.
-- Cost: for a dropped token, Phase 4 can only test signals at the checkpoint moments (1m, 5m,
-  15m, 1h, ...), not at arbitrary minutes in between.
+Once a token is 7 days old and its outcome is final, it is judged once
+(`radar/lab/retention.py`, settings under `retention:`):
+
+- **kept**: it graduated, reached a $30,000 market cap, or is watched. All snapshots stay.
+- **early**: a strategy could plausibly have picked it (it appeared on Rising or reached a
+  $10,000 market cap) but it is not in "kept". Its first 4 hours of snapshots stay at full
+  detail, win or lose; later ones are deleted.
+- **pruned**: it never reached any of those. All its snapshots are deleted.
+
+Whatever the verdict, the token, its outcome, its follow-up checkpoint rows, its raw launch
+event and its safety reports stay. Checkpoint rows also hold 5-minute and 1-hour volume, buys,
+sells and price change, so a pruned token still has its signal inputs at 1m, 5m, 15m, 1h, ...
+
+- Simulated on a copy of one day of data (39,350 tokens): 4,114 kept, 1,818 early, 33,374
+  pruned; 50% of snapshot rows remain; the database went from 253 MB to 186 MB.
+- Expected growth: about 2.1 GB a week with no retention, about 1.6 GB a week with this policy.
+  The first week grows at the full rate, because nothing is 7 days old until 2026-10-15. The
+  file never shrinks; freed space is reused.
+- Graduated tokens keep everything, not only their first 4 hours, so exit rules can be tested
+  over hours and days. Cutting them to 4 hours as well would save roughly 0.15 GB a week more.
 
 ## Open decisions
 

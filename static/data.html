@@ -233,10 +233,11 @@ function render(d) {
   const R = d.retention || {}, P = d.retention_policy, rs = d.retention_since_start;
   $("retention").replaceChildren(
     barRow("kept in full", `graduated, reached $${fmtInt(P.keep_min_peak_mcap_usd)} market cap, or watched`, R.kept || 0, d.tokens),
-    barRow("dropped", "died early: the token, its outcome and its checkpoint figures stay", R.pruned || 0, d.tokens),
+    barRow(`first ${P.early_keep_hours} hours kept`, `appeared on Rising or reached $${fmtInt(P.selectable_min_peak_mcap_usd)} market cap, win or lose`, R.early || 0, d.tokens),
+    barRow("dropped", "never reached any of those: the token, its outcome and its checkpoint figures stay", R.pruned || 0, d.tokens),
     barRow("not decided yet", `decided once the token is ${P.after_days} days old and its outcome is final`, R.undecided || 0, d.tokens));
-  $("retention-sub").textContent = P.enabled ? `on: early-dead tokens lose their snapshots after ${P.after_days} days` : "off: everything is kept";
-  $("retention-note").textContent = `Since the app last started: ${fmtInt(rs.pruned)} tokens dropped (${fmtInt(rs.snapshots_deleted)} snapshot rows), ${fmtInt(rs.kept)} kept. The database file does not shrink when rows are dropped; the freed space is reused, so it grows more slowly. Settings are under retention: in config/settings.yaml.`;
+  $("retention-sub").textContent = P.enabled ? `on: decided when a token is ${P.after_days} days old` : "off: everything is kept";
+  $("retention-note").textContent = `Since the app last started: ${fmtInt(rs.pruned)} tokens dropped, ${fmtInt(rs.early)} cut to their first hours, ${fmtInt(rs.kept)} kept in full (${fmtInt(rs.snapshots_deleted)} snapshot rows deleted). The database file does not shrink when rows are dropped; the freed space is reused, so it grows more slowly. Settings are under retention: in config/settings.yaml.`;
 
   const kinds = { ok: "ok", starting: "idle", degraded: "warn", stale: "warn", down: "crit" };
   $("health").replaceChildren(...Object.values(d.sources).map((src) => h("tr", null,

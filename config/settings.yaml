@@ -70,15 +70,21 @@ outcomes:
   moonshot_multiple: 10         # "moonshot": 10x or more
 
 # Data retention. Once a token's 7d follow-up is in and its outcome is final, we decide once
-# whether to keep its snapshots. Kept in full: tokens that graduated, tokens that reached
-# keep_min_peak_mcap_usd, and watched tokens. For every other token the snapshots are deleted;
-# the token itself, its outcome, its follow-up checkpoint rows (price, market cap, liquidity,
-# volume, buys/sells at 1m ... 7d), its raw launch event and any safety reports all stay.
-# Deleted snapshots cannot be brought back. Set enabled to false to keep everything.
+# what to keep of its snapshots:
+#   kept    all snapshots stay: it graduated, reached keep_min_peak_mcap_usd, or is watched
+#   early   the first early_keep_hours of snapshots stay, whether it won or lost: a strategy
+#           could plausibly have picked it (it appeared on Rising or reached
+#           selectable_min_peak_mcap_usd) but it does not qualify for "kept"
+#   pruned  all snapshots are deleted: it never reached any of the above
+# Whatever the verdict, the token itself, its outcome, its follow-up checkpoint rows (price,
+# market cap, liquidity, volume, buys/sells at 1m ... 7d), its raw launch event and any safety
+# reports all stay. Deleted snapshots cannot be brought back. Set enabled to false to keep everything.
 retention:
   enabled: true
   after_days: 7
   keep_min_peak_mcap_usd: 30000
+  selectable_min_peak_mcap_usd: 10000
+  early_keep_hours: 4
   interval_s: 300
   batch: 500                    # tokens judged per pass
 

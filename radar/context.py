@@ -28,4 +28,4 @@ class Ctx:
     # Follow-up checkpoints recorded since the app started, by status.
     followup_counts: dict[str, int] = field(default_factory=lambda: {"done": 0, "no_data": 0, "skipped": 0})
     # Retention decisions made since the app started.
-    retention_counts: dict[str, int] = field(default_factory=lambda: {"kept": 0, "pruned": 0, "snapshots_deleted": 0})
+    retention_counts: dict[str, int] = field(default_factory=lambda: {"kept": 0, "early": 0, "pruned": 0, "snapshots_deleted": 0})

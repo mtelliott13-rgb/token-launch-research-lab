@@ -166,8 +166,9 @@ CREATE TABLE IF NOT EXISTS token_state (
     bot_volume                  INTEGER,   -- 1 = many trades but a flat price (see radar/scoring/bot_volume.py)
     followup_idx                INTEGER,   -- position of the next follow-up checkpoint (config order)
     followup_at                 REAL,      -- when the follow-up loop should make that check; NULL = none left
-    -- Retention decision, made once the 7d follow-up is in: 'kept' = full snapshots stay,
-    -- 'pruned' = snapshots deleted (token, outcome and follow-up rows stay). NULL = not decided yet.
+    -- Retention decision, made once the 7d follow-up is in: 'kept' = all snapshots stay,
+    -- 'early' = only the first hours of snapshots stay, 'pruned' = snapshots deleted
+    -- (token, outcome and follow-up rows always stay). NULL = not decided yet.
     retention                   TEXT,
     retention_at                REAL,
     peak_mcap                   REAL       -- highest market cap in the token's snapshots when that was decided

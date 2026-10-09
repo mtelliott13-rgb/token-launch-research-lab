@@ -180,8 +180,9 @@ def test_upgrade_splits_old_labels_and_fills_checkpoint_figures():
     assert checks["5m"]["buys_m5"] is None
 
 
-def test_retention_drops_snapshots_of_early_dead_tokens_only():
+def test_retention_keeps_all_first_hours_or_nothing_depending_on_how_far_the_token_got():
     week = 7 * 86400
+    tokens_checked = ("DEAD", "GRAD", "BIG", "WATCHED", "RISING", "TENK", "YOUNG")
 
     async def flow(ctx):
         s = ctx.store
@@ -191,11 +192,14 @@ def test_retention_drops_snapshots_of_early_dead_tokens_only():
             "GRAD": {"migrated_at": T0 + 500},        # graduated
             "BIG": {},                                # never graduated but reached $45k
             "WATCHED": {"watched": 1},
+            "RISING": {"rising_seen_at": T0 + 400},   # made the Rising list, then died
+            "TENK": {},                               # reached $12k, never graduated
             "YOUNG": {},                              # follow-ups not finished
         }
+        peaks = {"BIG": 45_000.0, "TENK": 12_000.0}
         for mint, state in tokens.items():
             s.upsert_token(mint, source="pumpportal", first_seen_at=T0)
-            for age, mcap in ((90, 4_000.0), (300, 45_000.0 if mint == "BIG" else 3_500.0), (900, 3_000.0)):
+            for age, mcap in ((90, 4_000.0), (300, peaks.get(mint, 3_500.0)), (900, 3_000.0), (5 * 3600, 2_500.0)):
                 s.add_snapshot(mint, T0 + age, "dexscreener", {"price_usd": mcap / 1e9, "mcap": mcap})
             s.add_followup(mint, "1m", T0 + 60, T0 + 90, "done", {"price_usd": 4e-6, "mcap": 4_000.0})
             done = mint != "YOUNG"
@@ -207,15 +211,18 @@ def test_retention_drops_snapshots_of_early_dead_tokens_only():
     (first, again), ctx, _ = run(pairs(), flow)
     s = ctx.store
     left = dict(s.db.execute("SELECT mint, COUNT(*) FROM snapshots GROUP BY mint").fetchall())
-    assert first == 4 and again == 0
-    assert left == {"GRAD": 3, "BIG": 3, "WATCHED": 3, "YOUNG": 3}
-    assert {m: s.row(m)["retention"] for m in ("DEAD", "GRAD", "BIG", "WATCHED", "YOUNG")} == {
-        "DEAD": "pruned", "GRAD": "kept", "BIG": "kept", "WATCHED": "kept", "YOUNG": None}
+    assert first == 6 and again == 0
+    # kept: everything; early: the first 4 hours only (the 5h snapshot goes); pruned: nothing
+    assert left == {"GRAD": 4, "BIG": 4, "WATCHED": 4, "RISING": 3, "TENK": 3, "YOUNG": 4}
+    assert {m: s.row(m)["retention"] for m in tokens_checked} == {
+        "DEAD": "pruned", "GRAD": "kept", "BIG": "kept", "WATCHED": "kept", "RISING": "early", "TENK": "early", "YOUNG": None}
+    assert s.db.execute("SELECT MAX(ts) FROM snapshots WHERE mint = 'TENK'").fetchone()[0] == T0 + 900
+    assert s.row("TENK")["peak_mcap"] == 12_000.0
     # the dead token is still a full member of the dataset
     assert s.row("DEAD")["peak_mcap"] == 4_000.0 and s.outcome("DEAD")["peak"] == "flat"
     assert s.followups_for("DEAD")["1m"]["mcap"] == 4_000.0
-    assert ctx.retention_counts == {"kept": 3, "pruned": 1, "snapshots_deleted": 3}
-    assert stats.collect(s.db, ctx.cfg)["retention"] == {"kept": 3, "pruned": 1, "undecided": 1}
+    assert ctx.retention_counts == {"kept": 3, "early": 2, "pruned": 1, "snapshots_deleted": 6}
+    assert stats.collect(s.db, ctx.cfg)["retention"] == {"kept": 3, "early": 2, "pruned": 1, "undecided": 1}
 
 
 def test_retention_waits_for_the_configured_age():
