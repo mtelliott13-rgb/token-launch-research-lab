@@ -1,0 +1,163 @@
+-- Meme Radar schema. Every statement is idempotent; it runs on each start.
+-- Timestamps are Unix seconds (UTC) as REAL.
+
+-- One row per token, written the first time any source shows it to us.
+-- Rows are never deleted: dead tokens must stay to avoid survivorship bias.
+CREATE TABLE IF NOT EXISTS tokens (
+    mint                TEXT PRIMARY KEY,
+    name                TEXT,
+    symbol              TEXT,
+    creator             TEXT,
+    created_at          REAL,      -- pumpportal: time we received the create event (it carries no timestamp);
+                                   -- gecko/dexscreener: pool/pair creation time
+    first_seen_at       REAL NOT NULL,
+    source              TEXT NOT NULL,   -- pumpportal / gecko / dexscreener (first source to show it)
+    metadata_uri        TEXT,
+    twitter             TEXT,
+    telegram            TEXT,
+    website             TEXT,
+    launchpad           TEXT,
+    image_url           TEXT,
+    description         TEXT,
+    bonding_curve       TEXT,
+    pool_address        TEXT,      -- current main pool/pair; used for charts
+    dex_id              TEXT,
+    initial_buy_tokens  REAL,
+    initial_buy_sol     REAL,
+    initial_mcap_sol    REAL,
+    mayhem_mode         INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tokens_created ON tokens(created_at);
+CREATE INDEX IF NOT EXISTS idx_tokens_creator ON tokens(creator);
+
+-- Time series of market data. A row is skipped when nothing changed since the
+-- previous one, so a gap means "unchanged", not "not checked".
+CREATE TABLE IF NOT EXISTS snapshots (
+    mint            TEXT NOT NULL,
+    ts              REAL NOT NULL,
+    source          TEXT NOT NULL,
+    price_usd       REAL,
+    mcap            REAL,
+    fdv             REAL,
+    liquidity_usd   REAL,          -- NULL while a token is still on a bonding curve
+    vol_m5          REAL,
+    vol_h1          REAL,
+    vol_h6          REAL,
+    vol_h24         REAL,
+    buys_m5         INTEGER,
+    sells_m5        INTEGER,
+    buys_h1         INTEGER,
+    sells_h1        INTEGER,
+    buys_h24        INTEGER,
+    sells_h24       INTEGER,
+    price_chg_m5    REAL,
+    price_chg_h1    REAL,
+    price_chg_h24   REAL,
+    boosted         INTEGER,       -- paid DexScreener promotion active at this time
+    boosts_active   INTEGER,
+    dex_id          TEXT,
+    pair_address    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_mint_ts ON snapshots(mint, ts);
+
+-- Individual trades for watched tokens. Empty for now: PumpPortal's trade
+-- stream needs a funded API key, which is outside the free-sources rule.
+CREATE TABLE IF NOT EXISTS trades (
+    mint            TEXT NOT NULL,
+    ts              REAL NOT NULL,
+    side            TEXT,
+    sol_amount      REAL,
+    token_amount    REAL,
+    trader          TEXT,
+    mcap_sol        REAL
+);
+CREATE INDEX IF NOT EXISTS idx_trades_mint_ts ON trades(mint, ts);
+
+CREATE TABLE IF NOT EXISTS migrations (
+    mint            TEXT NOT NULL,
+    ts              REAL NOT NULL,
+    pool            TEXT,
+    signature       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_migrations_mint ON migrations(mint);
+
+CREATE TABLE IF NOT EXISTS safety (
+    mint                        TEXT NOT NULL,
+    ts                          REAL NOT NULL,
+    mint_authority_enabled      INTEGER,
+    freeze_authority_enabled    INTEGER,
+    top10_pct                   REAL,   -- excludes liquidity pools / bonding curve accounts
+    top_holder_pct              REAL,
+    lp_locked_pct               REAL,
+    risk_score                  REAL,
+    risk_score_normalised       REAL,
+    rugged                      INTEGER,
+    total_holders               INTEGER,
+    insiders_detected           INTEGER,
+    creator                     TEXT,
+    creator_balance             REAL,
+    risks_json                  TEXT,
+    top_holders_json            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_safety_mint_ts ON safety(mint, ts);
+
+-- Raw payloads exactly as received (PumpPortal events, DexScreener profiles and boosts).
+CREATE TABLE IF NOT EXISTS raw_events (
+    id              INTEGER PRIMARY KEY,
+    ts              REAL NOT NULL,
+    source          TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    mint            TEXT,
+    payload         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_raw_events_mint ON raw_events(mint);
+
+-- Latest known values per token plus refresh scheduling. This is a cache for
+-- the dashboard; the history lives in the tables above.
+CREATE TABLE IF NOT EXISTS token_state (
+    mint                        TEXT PRIMARY KEY,
+    snapshot_ts                 REAL,
+    snapshot_source             TEXT,
+    snap_sig                    TEXT,
+    price_usd                   REAL,
+    mcap                        REAL,
+    fdv                         REAL,
+    liquidity_usd               REAL,
+    vol_m5                      REAL,
+    vol_h1                      REAL,
+    vol_h24                     REAL,
+    buys_m5                     INTEGER,
+    sells_m5                    INTEGER,
+    buys_h1                     INTEGER,
+    sells_h1                    INTEGER,
+    price_chg_m5                REAL,
+    price_chg_h1                REAL,
+    boosts_active               INTEGER,
+    score                       REAL,
+    vol_accel                   REAL,
+    buy_pressure                REAL,
+    txn_growth                  REAL,
+    migrated_at                 REAL,
+    trending_rank               INTEGER,
+    trending_seen_at            REAL,
+    rising_seen_at              REAL,
+    profile_seen_at             REAL,
+    boost_seen_at               REAL,
+    boost_total                 INTEGER,
+    watched                     INTEGER NOT NULL DEFAULT 0,
+    next_refresh_at             REAL,
+    last_checked_at             REAL,
+    miss_count                  INTEGER NOT NULL DEFAULT 0,
+    safety_ts                   REAL,
+    mint_authority_enabled      INTEGER,
+    freeze_authority_enabled    INTEGER,
+    top10_pct                   REAL,
+    top_holder_pct              REAL,
+    lp_locked_pct               REAL,
+    risk_score                  REAL,
+    risk_score_normalised       REAL,
+    rugged                      INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
+CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);
+CREATE INDEX IF NOT EXISTS idx_state_profile ON token_state(profile_seen_at);
