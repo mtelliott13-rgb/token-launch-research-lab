@@ -79,6 +79,7 @@ bot_volume:
   min_txns_h1: 300
   max_abs_price_chg_h1: 1.0
   max_abs_price_chg_m5: 1.0
+  max_mcap_usd: 1000000         # only judge tokens under this market cap; bigger ones are flat for honest reasons
 
 rising:
   min_liquidity_usd: 10000      # for tokens with a liquidity pool
@@ -86,6 +87,25 @@ rising:
   min_age_min: 3
   min_txns_m5: 10
   max_snapshot_age_s: 180       # ignore tokens whose data is older than this
+  # This is a meme coin radar: stablecoins and major tokens are kept off the Rising list.
+  # Anything above max_mcap_usd is left out, and so is every address in exclude_mints
+  # whatever its market cap. They are still recorded in the database.
+  max_mcap_usd: 50000000
+  exclude_mints:
+    - EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v    # USDC
+    - Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB    # USDT
+    - So11111111111111111111111111111111111111112     # SOL (wrapped)
+    - JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN     # JUP
+    - pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn     # PUMP
+    - ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82     # BOME
+    - DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263    # BONK
+    - EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm    # WIF
+    - 6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN    # TRUMP
+    - 2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv    # PENGU
+    - 9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump    # Fartcoin
+    - 3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh    # WBTC (Wormhole)
+    - cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij     # cbBTC
+    - 7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs    # WETH (Wormhole)
   limit: 50
   refresh_s: 10
 

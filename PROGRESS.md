@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 61 tests passing (`.venv/bin/python -m pytest`; see environment notes).
+- 63 tests passing (`uv run pytest`).
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -51,8 +51,12 @@ the Rising list is ranked, and token details work.
 - **Holders column** on New launches and Rising, from the latest RugCheck report, so it is
   empty for tokens that have not had a safety check.
 - **"Likely bot volume" badge**, version 0: at least 300 trades in the last hour with the price
-  within 1% over both the last hour and the last 5 minutes. Thresholds in `config/settings.yaml`.
-  It also marks large, stable tokens (USDC, JUP, PUMP), which are busy and flat for honest reasons.
+  within 1% over both the last hour and the last 5 minutes, and a market cap under $1M (large
+  tokens are busy and flat for honest reasons). Thresholds in `config/settings.yaml`.
+- **Rising is for meme coins only.** Anything above $50M market cap is left out, and so is a
+  fixed list of stablecoins and major tokens (USDC, USDT, SOL, JUP, PUMP, BOME, BONK, WIF, TRUMP,
+  PENGU, Fartcoin, WBTC, cbBTC, WETH) whatever their size. Both are under `rising:` in
+  `config/settings.yaml`. These tokens are still recorded in the database.
 
 ## Left in Phase 1
 
@@ -74,13 +78,13 @@ table (Phase 3), the `outcomes` table and follow-up snapshots (Phase 2).
 
 ## Open decisions
 
-1. **Stray database files / folder location.** `data/` contains `radar 2.db-wal`,
-   `radar 2.db-shm`, `radar 3.db-wal` and `radar 3.db-shm`, which the app did not create under
-   those names. That naming is what macOS file syncing (for example iCloud's Desktop &
-   Documents) produces when it duplicates a file; the cause is not confirmed. The real
-   database passed its integrity check. If the Documents folder is synced, the suggestion is
-   to move the whole `meme-radar` folder somewhere that is not, because syncing a live
-   database risks corruption. The stray files have been left untouched.
+1. **Stray database files: resolved, pending a decision to delete.** The `radar 2/3/4`
+   `.db-wal` / `.db-shm` pairs were made on 2026-10-08 between 18:15 and 18:28, while the folder
+   was still in Documents; each one's creation time matches an app start in the log. None has
+   appeared in the 20 hours of running since the move, which fits the file-syncing explanation
+   (not confirmed: checking the Mac's sync settings means looking outside this folder). They are
+   leftovers from short test runs, not part of the live database, and now sit in `data/archive/`.
+   They can be deleted whenever the user says so.
 
 2. **PumpPortal trade data (needed before Phase 2b).** PumpPortal now refuses per-token trade
    subscriptions without an API key funded with at least 0.02 SOL, so there is no free
@@ -98,9 +102,7 @@ table (Phase 3), the `outcomes` table and follow-up snapshots (Phase 2).
 ## Environment notes
 
 - uv is installed at `~/.local/bin/uv`. Project libraries are in `.venv/`.
-- The folder was moved from `~/Documents/meme-radar` to `~/meme-radar`. The app starts fine, but
-  `uv run pytest` now picks up the wrong Python, because the test launcher inside `.venv/` still
-  points at the old location. Use `.venv/bin/python -m pytest`. Rebuilding `.venv/` would fix it;
-  do that only while the collector is stopped.
+- The folder was moved from `~/Documents/meme-radar` to `~/meme-radar` on 2026-10-08 at 19:07.
+  `.venv/` was rebuilt on 2026-10-09 so its launchers point at the new location.
 - Git name and email are set for this project only (in `.git/config`).
 - The working rules for this project are in `CLAUDE.md` under "Working rules".

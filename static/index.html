@@ -259,7 +259,7 @@ function flags(r) {
   if (r.paid_boost) out.push(badge("warn", "Paid boost", "Paid promotion on DexScreener. This is advertising, not organic interest."));
   if (r.trending_rank) out.push(badge("info", "Trending #" + r.trending_rank, "On GeckoTerminal's Solana trending list"));
   if (r.graduated) out.push(badge("info", "Graduated", "Off the bonding curve: it has a real liquidity pool"));
-  if (r.bot_volume) out.push(badge("warn", "Likely bot volume", "Many trades in the last hour but the price barely moved, which usually means wallets trading back and forth to inflate the numbers. Thresholds are in config/settings.yaml."));
+  if (r.bot_volume) out.push(badge("warn", "Likely bot volume", "Many trades in the last hour but the price barely moved, which usually means wallets trading back and forth to inflate the numbers. Only applied to tokens under $1M market cap. Thresholds are in config/settings.yaml."));
   if (r.no_rugcheck_report) {
     out.push(badge("idle", "No RugCheck report", "We asked RugCheck and it has no report for this token."));
   } else if (r.safety_ts == null) {
@@ -409,8 +409,9 @@ function renderHow(cfg) {
     `For tokens younger than an hour, the hourly average only counts the 5-minute windows the token has existed for, so new tokens are not flattered. A token that just graduated counts as new again, because its new pool's history starts at graduation.`,
     `Each ratio r is squashed to r ÷ (1 + r), then the three are combined into a 0 to 100 score. 50 means steady trading with balanced buying and selling.`,
     `To be listed a token needs: at least ${r.min_age_min} minutes of age, at least ${r.min_txns_m5} trades in the last 5 minutes, and at least ${fmtUsd(r.min_liquidity_usd)} of liquidity (or ${fmtUsd(r.min_curve_mcap_usd)} market cap if it is still on a bonding curve, where there is no pool to measure).`,
+    r.max_mcap_usd != null && `Stablecoins and major tokens are left out: anything above ${fmtUsd(r.max_mcap_usd)} market cap, plus a fixed list (USDC, USDT, SOL, JUP, PUMP, BOME and others) in config/settings.yaml.`,
     `This is version 0. The weights live in config/settings.yaml and have not been tested against outcomes yet. Paid boosts never raise the score.`,
-  ].map((t) => h("li", null, t)));
+  ].filter(Boolean).map((t) => h("li", null, t)));
   $("watch-s").textContent = cfg.refresh.watched_s;
 }
 

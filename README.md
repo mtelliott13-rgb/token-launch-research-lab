@@ -14,7 +14,7 @@ Then open http://localhost:8000. Press Ctrl+C in the terminal to stop. The first
 `.venv/` (the Python libraries) and `data/radar.db` (the database). Leave it running as much
 as you can: the later strategy work depends on how much data has been collected.
 
-Run the tests with `.venv/bin/python -m pytest`.
+Run the tests with `uv run pytest`.
 
 ## What is on the page
 

@@ -82,3 +82,12 @@ def test_eligibility_needs_age_trades_and_liquidity():
 def test_bonding_curve_tokens_use_market_cap_floor():
     assert is_eligible(snap(liquidity_usd=None, mcap=30_000), 10, R)
     assert not is_eligible(snap(liquidity_usd=None, mcap=4_000), 10, R)
+
+
+def test_stablecoins_and_major_tokens_are_kept_off_rising():
+    usdc, bome = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82"
+    assert is_eligible(snap(mint="SomeMemeMint", mcap=2_000_000), 10, R)
+    assert not is_eligible(snap(mint=usdc, mcap=60_000_000_000), 10, R)
+    assert not is_eligible(snap(mint=bome, mcap=20_000_000), 10, R)        # on the list, whatever its size
+    assert not is_eligible(snap(mint="SomeBigMint", mcap=300_000_000), 10, R)  # not listed, but too big
+    assert is_eligible(snap(mint="SomeMemeMint", mcap=R["max_mcap_usd"]), 10, R)
