@@ -62,6 +62,7 @@ def test_older_database_gets_new_columns_and_holder_counts(tmp_path):
     s.add_safety("M1", 5.0, {"total_holders": 10})
     s.add_safety("M1", 9.0, {"total_holders": 42})
     s.update_state("M1", safety_ts=9.0)
+    s.db.execute("DROP INDEX idx_state_followup")
     for column in ADDED_COLUMNS["token_state"]:
         s.db.execute(f"ALTER TABLE token_state DROP COLUMN {column}")
     s.close()

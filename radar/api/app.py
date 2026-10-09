@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from radar import rising
-from radar.collectors import dexscreener, geckoterminal, pumpportal
+from radar.collectors import dexscreener, followup, geckoterminal, pumpportal
 from radar.collectors.common import publish_tokens, supervise
 from radar.collectors.rugcheck import SafetyService, no_report_note
 from radar.config import ROOT, load_settings
@@ -24,6 +24,8 @@ from radar.db.store import Store
 from radar.events import EventBus
 from radar.health import Health
 from radar.http import SourceClient, SourceError
+from radar.lab import backfill, stats
+from radar.lab.followups import step_in_delay
 from radar.view import is_mint, view_row
 
 log = logging.getLogger(__name__)
@@ -44,9 +46,10 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
     health.register("dexscreener_promo", label="DexScreener (profiles, boosts)", expected_interval_s=src["dexscreener"]["profiles_poll_s"])
     health.register("geckoterminal", label="GeckoTerminal (pools, charts)", expected_interval_s=src["geckoterminal"]["new_pools_poll_s"])
     health.register("rugcheck", label="RugCheck (safety)")
+    health.register("followups", label="Follow-ups (outcomes)", expected_interval_s=60)
     ctx = Ctx(
         cfg=cfg,
-        store=Store(ROOT / cfg["database"]["path"]),
+        store=Store(ROOT / cfg["database"]["path"], first_followup_s=step_in_delay(0, cfg["followups"])),
         health=health,
         bus=EventBus(),
         dex=SourceClient("dexscreener", src["dexscreener"]["pairs_per_min"], http, health),
@@ -75,6 +78,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         http = httpx.AsyncClient(timeout=20, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
         ctx = build_ctx(cfg, http)
         app.state.ctx = ctx
+        backfill.run(ctx.store, cfg, time.time())
         collectors = {
             "pumpportal": pumpportal.run,
             "dexscreener:refresh": dexscreener.refresh_loop,
@@ -82,6 +86,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             "geckoterminal:new_pools": lambda c: geckoterminal.poll_loop(c, "new_pools"),
             "geckoterminal:trending_pools": lambda c: geckoterminal.poll_loop(c, "trending_pools"),
             "rugcheck:queue": ctx.safety.run,
+            "followups": followup.run,
             "rising": rising.run,
         }
         tasks = [asyncio.create_task(supervise(name, ctx, fn), name=name) for name, fn in collectors.items()]
@@ -111,6 +116,24 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/data")
+    async def data_page() -> FileResponse:
+        return FileResponse(STATIC / "data.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/data")
+    async def data(request: Request) -> dict[str, Any]:
+        """Counts for the Data page. Read on a separate connection so big counts never stall the collectors."""
+        ctx = ctx_of(request)
+        now = time.time()
+        cached = getattr(app.state, "data_cache", None)
+        if cached is None or now - cached[0] > 30:
+            in_memory = ctx.store.path == ":memory:"  # tests: one connection, so stay on this thread
+            counts = stats.collect_from(ctx.store, cfg) if in_memory else await asyncio.to_thread(stats.collect_from, ctx.store, cfg)
+            cached = (now, counts)
+            app.state.data_cache = cached
+        return {**cached[1], "as_of": cached[0], "now": now, "sources": ctx.health.snapshot(),
+                "since_start": dict(ctx.followup_counts), "labels": cfg["outcomes"]}
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:

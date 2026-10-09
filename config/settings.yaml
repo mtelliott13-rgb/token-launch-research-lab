@@ -43,8 +43,34 @@ sources:
     no_report_retry_s: [600, 3600]  # RugCheck has no report: ask again after 10 min, then 1 hour, then stop
     error_retry_s: 120          # RugCheck unreachable: leave that token alone for this long
 
+# Phase 2: follow-up checks. Every token is looked up again on DexScreener at each of these
+# ages (seconds since we first saw it), even after the live refresh below has given up on it.
+# The outcome columns use the names 1h, 24h, 72h and 7d, so keep those.
+followups:
+  checkpoints: {1m: 60, 5m: 300, 15m: 900, 1h: 3600, 4h: 14400, 24h: 86400, 72h: 259200, 7d: 604800}
+  # A check still counts if it is made up to half the checkpoint's age late (so 1h may be
+  # checked up to 1h30), but never less than min_late_s or more than max_late_s late.
+  # Anything later is recorded as "skipped".
+  late_fraction: 0.5
+  min_late_s: 60
+  max_late_s: 21600
+  step_in_s: 30                 # give the live refresh this long to make the check for free first
+  cycle_s: 5
+  max_batches_per_cycle: 2      # about 20 requests/min at most, on top of the live refresh
+  scan_limit: 3000
+  priority_mcap_usd: 15000      # when behind: graduated first, then tokens above this, then the rest
+
+# Phase 2: outcome labels, computed from p0 = the first price we saw for a token.
+outcomes:
+  rug_drop_pct: 90              # "rug": price or pool liquidity falls this much...
+  rug_window_s: 3600            # ...within this long
+  rug_min_liquidity_usd: 1000   # ignore liquidity drops from pools smaller than this
+  dead_vol_h24_usd: 1000        # "dead": 24h volume under this at day 7
+  runner_multiple: 3            # "runner": peak in the first 24h is 3x to 10x p0
+  moonshot_multiple: 10         # "moonshot": 10x or more
+
 # How often each token's pair data is re-fetched from DexScreener (seconds).
-# A token that matches no rule stops being refreshed (Phase 2 adds follow-up snapshots).
+# A token that matches no rule stops being refreshed; the follow-up checks above still happen.
 refresh:
   first_delay_s: 20             # wait after creation so DexScreener has indexed it
   watched_s: 10

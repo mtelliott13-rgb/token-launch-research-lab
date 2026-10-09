@@ -163,8 +163,56 @@ CREATE TABLE IF NOT EXISTS token_state (
     safety_miss_count           INTEGER NOT NULL DEFAULT 0,
     safety_miss_at              REAL,
     safety_retry_at             REAL,      -- when to ask again; NULL with misses > 0 means we stopped asking
-    bot_volume                  INTEGER    -- 1 = many trades but a flat price (see radar/scoring/bot_volume.py)
+    bot_volume                  INTEGER,   -- 1 = many trades but a flat price (see radar/scoring/bot_volume.py)
+    followup_idx                INTEGER,   -- position of the next follow-up checkpoint (config order)
+    followup_at                 REAL       -- when the follow-up loop should make that check; NULL = none left
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);
 CREATE INDEX IF NOT EXISTS idx_state_profile ON token_state(profile_seen_at);
+
+-- Phase 2. One row per token per follow-up checkpoint (1m, 5m, ... 7d after first seen).
+--   done        looked up on DexScreener in time; the figures are below
+--   no_data     looked up in time, but DexScreener had no pair for the token
+--   skipped     not looked up in time (collector off or behind), so the figures are unknown
+--   backfilled  taken from snapshots recorded before follow-ups existed
+CREATE TABLE IF NOT EXISTS followups (
+    mint            TEXT NOT NULL,
+    checkpoint      TEXT NOT NULL,
+    due_at          REAL NOT NULL,
+    done_at         REAL,
+    status          TEXT NOT NULL,
+    price_usd       REAL,
+    mcap            REAL,
+    liquidity_usd   REAL,
+    vol_h24         REAL,
+    PRIMARY KEY (mint, checkpoint)
+) WITHOUT ROWID;
+
+-- Phase 2. What happened to each token after p0, the first price we saw for it.
+-- Recomputed each time one of the token's follow-up checkpoints is recorded.
+CREATE TABLE IF NOT EXISTS outcomes (
+    mint                        TEXT PRIMARY KEY,
+    p0_price                    REAL,
+    p0_ts                       REAL,
+    peak_multiple_24h           REAL,   -- highest price seen in the 24h after p0, as a multiple of p0
+    time_to_peak_min            REAL,
+    multiple_1h                 REAL,   -- price at the checkpoint / p0
+    multiple_24h                REAL,
+    multiple_72h                REAL,
+    multiple_7d                 REAL,
+    max_drawdown_before_peak    REAL,   -- deepest fall from a high on the way to the peak, 0 to 1
+    rugged                      INTEGER,
+    dead_at_7d                  INTEGER,
+    label                       TEXT,   -- rug / dead / flat / runner / moonshot / no_data; NULL = cannot tell yet
+    final                       INTEGER NOT NULL DEFAULT 0,  -- 1 = the 7d checkpoint has passed; nothing more is coming
+    complete                    INTEGER NOT NULL DEFAULT 0,  -- 1 = final and nothing is missing
+    missing                     TEXT,   -- comma-separated fields we do not have (yet)
+    computed_at                 REAL
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_label ON outcomes(label);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key             TEXT PRIMARY KEY,
+    value           TEXT
+);

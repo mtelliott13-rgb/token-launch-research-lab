@@ -34,6 +34,10 @@
   .mark { font-size: 10px; }
   .mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.crit { color: var(--crit); } .mark.idle { color: var(--muted); }
   #stats { margin-left: auto; color: var(--ink2); }
+  .nav { display: flex; gap: 4px; }
+  .nav a { padding: 2px 10px; border-radius: 999px; color: var(--ink2); text-decoration: none; }
+  .nav a:hover { color: var(--ink); }
+  .nav a[aria-current=page] { background: var(--raised); color: var(--ink); }
 
   main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 12px 16px; align-items: start; }
   @media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
@@ -107,6 +111,7 @@
 <body>
 <header>
   <h1>Meme Radar</h1>
+  <nav class="nav"><a href="/" aria-current="page">Dashboard</a><a href="/data">Data</a></nav>
   <span id="conn"><span class="mark idle">●</span><span>connecting</span></span>
   <div id="sources" class="chips" aria-label="Collector health"></div>
   <div id="stats"></div>

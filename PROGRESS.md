@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-10-09, after the first 20-hour run.
+Last updated: 2026-10-09, Phase 2 built.
 
 ## Start the dashboard
 
@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 63 tests passing (`uv run pytest`).
+- 76 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -74,7 +74,44 @@ Nothing required is missing. These are loose ends:
 - **Stray files in `data/`**: see open decision 1.
 
 Deliberately left for later phases: the disabled X/Twitter provider and the `social_posts`
-table (Phase 3), the `outcomes` table and follow-up snapshots (Phase 2).
+table (Phase 3).
+
+## Done (Phase 2, built 2026-10-09)
+
+- **Follow-up checks.** Every token is looked up again on DexScreener 1m, 5m, 15m, 1h, 4h, 24h,
+  72h and 7d after we first saw it, including tokens the live refresh has given up on. Each
+  check is saved in the `followups` table as done, no_data (DexScreener did not list it),
+  skipped (not made in time) or backfilled. Code: `radar/lab/followups.py` and
+  `radar/collectors/followup.py`.
+- **Budget, measured on the 20.5-hour run.** About 43,500 new tokens a day (not 30,000), about
+  1,050 graduations a day. Following all of them is about 348,000 lookups a day, roughly
+  8 requests a minute, against our own cap of 120 a minute. The live refresh already makes most
+  early checks for free. Follow-ups are capped at about 20 requests a minute. When behind:
+  graduated tokens first, then tokens at or above $15k market cap or on Rising, trending or
+  watched, then the rest.
+- **Outcomes.** The `outcomes` table holds p0, peak multiple in the first 24h, time to peak,
+  multiples at 1h, 24h, 72h and 7d, drawdown before the peak, rugged, dead at day 7 and a label.
+  Rules and label order are documented at the top of `radar/lab/outcomes.py`; thresholds are
+  under `outcomes:` in `config/settings.yaml`. `final` means day 7 has passed, `complete` means
+  final with nothing missing, and `missing` lists what is not there.
+- **Existing tokens.** On the first start with this code, tokens already in the database get
+  their past checkpoints filled from snapshots where the snapshots support it, and marked
+  skipped where they do not (`radar/lab/backfill.py`). It runs once and took about 6 seconds on a
+  copy of the database. Nothing is complete yet: no token is 7 days old.
+- **Data page** at http://localhost:8000/data: tokens recorded, label breakdown, which outcome
+  fields are filled, follow-up coverage per checkpoint, collector health.
+
+Things to know about Phase 2 data:
+
+- p0 is the first DexScreener price we see, usually about 90 seconds after launch, because
+  DexScreener does not list a new pump.fun token sooner. The "1m" check is accepted up to 2m.
+- The peak is only as fine as our snapshots. A spike between two looks is not seen.
+- A few tokens show absurd peaks (thousands of times p0 or more). These are real DexScreener
+  prices from pools with almost no liquidity, not something anyone could have traded. Phase 4
+  needs a liquidity filter before these are counted as wins.
+- A runner or moonshot that later collapsed keeps its label and also has rugged = 1.
+- Disk: the database grows by roughly 250 MB a day; follow-ups add an estimated 35 MB a day.
+  There is no pruning yet.
 
 ## Open decisions
 

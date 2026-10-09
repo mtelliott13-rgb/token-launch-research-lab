@@ -23,12 +23,26 @@ ADDED_COLUMNS = {
         "safety_miss_at": "REAL",
         "safety_retry_at": "REAL",
         "bot_volume": "INTEGER",
+        "followup_idx": "INTEGER",
+        "followup_at": "REAL",
     },
 }
+# Indexes on those columns, created after the columns are sure to exist.
+ADDED_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_state_followup ON token_state(followup_at)",
+)
+OUTCOME_FIELDS = (
+    "p0_price", "p0_ts", "peak_multiple_24h", "time_to_peak_min", "multiple_1h", "multiple_24h",
+    "multiple_72h", "multiple_7d", "max_drawdown_before_peak", "rugged", "dead_at_7d", "label",
+    "final", "complete", "missing", "computed_at",
+)
 
 
 class Store:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, first_followup_s: float = 90.0):
+        self.path = str(path)
+        # How long after we first see a token its first follow-up check falls due.
+        self.first_followup_s = first_followup_s
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         # isolation_level=None: autocommit, with explicit transactions via tx().
@@ -60,6 +74,8 @@ class Store:
                 "UPDATE token_state SET total_holders = (SELECT total_holders FROM safety "
                 "WHERE safety.mint = token_state.mint ORDER BY ts DESC LIMIT 1) WHERE safety_ts IS NOT NULL"
             )
+        for statement in ADDED_INDEXES:
+            self.db.execute(statement)
 
     @contextmanager
     def tx(self):
@@ -95,7 +111,10 @@ class Store:
                     f"INSERT INTO tokens ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                     (mint, source, first_seen_at, *fields.values()),
                 )
-                self.db.execute("INSERT OR IGNORE INTO token_state (mint) VALUES (?)", (mint,))
+                self.db.execute(
+                    "INSERT OR IGNORE INTO token_state (mint, followup_idx, followup_at) VALUES (?, 0, ?)",
+                    (mint, first_seen_at + self.first_followup_s),
+                )
             elif fields:
                 sets = ", ".join(f"{k} = COALESCE({k}, ?)" for k in fields)
                 self.db.execute(f"UPDATE tokens SET {sets} WHERE mint = ?", (*fields.values(), mint))
@@ -164,6 +183,65 @@ class Store:
             "SELECT safety_miss_count, safety_retry_at FROM token_state WHERE mint = ?", (mint,)
         ).fetchone()
         return (row[0], row[1]) if row else (0, None)
+
+    # ---- follow-ups and outcomes (Phase 2) ---------------------------------
+
+    def add_followup(
+        self, mint: str, checkpoint: str, due_at: float, done_at: float | None, status: str,
+        seen: dict[str, Any] | None = None,
+    ) -> None:
+        seen = seen or {}
+        self.db.execute(
+            "INSERT OR REPLACE INTO followups (mint, checkpoint, due_at, done_at, status, price_usd, mcap, "
+            "liquidity_usd, vol_h24) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (mint, checkpoint, due_at, done_at, status, seen.get("price_usd"), seen.get("mcap"),
+             seen.get("liquidity_usd"), seen.get("vol_h24")),
+        )
+
+    def followups_for(self, mint: str) -> dict[str, dict[str, Any]]:
+        cur = self.db.execute("SELECT * FROM followups WHERE mint = ?", (mint,))
+        return {r["checkpoint"]: dict(r) for r in cur}
+
+    def followups_due(self, now: float, limit: int, priority_mcap_usd: float) -> list[dict[str, Any]]:
+        """Tokens whose next follow-up check is due: graduated first, then notable ones, then the rest."""
+        cur = self.db.execute(
+            f"{ROW_SQL} WHERE s.followup_at <= ? ORDER BY CASE WHEN {GRADUATED_SQL} THEN 0 "
+            "WHEN s.mcap >= ? OR s.watched = 1 OR s.rising_seen_at IS NOT NULL OR s.trending_seen_at IS NOT NULL "
+            "THEN 1 ELSE 2 END, s.followup_at LIMIT ?",
+            (now, priority_mcap_usd, limit),
+        )
+        return [dict(r) for r in cur]
+
+    def price_points(self, mint: str) -> list[tuple[float, float, float | None]]:
+        """(time, price, pool liquidity) for every priced DexScreener snapshot of a token, oldest first.
+
+        One source only: GeckoTerminal can quote a different pool of the same token, and mixing
+        the two turns the gap between pools into price moves that never happened.
+        """
+        cur = self.db.execute(
+            "SELECT ts, price_usd, liquidity_usd FROM snapshots "
+            "WHERE mint = ? AND source = 'dexscreener' AND price_usd IS NOT NULL ORDER BY ts",
+            (mint,),
+        )
+        return [tuple(r) for r in cur]
+
+    def upsert_outcome(self, mint: str, outcome: dict[str, Any]) -> None:
+        self.db.execute(
+            f"INSERT OR REPLACE INTO outcomes (mint, {', '.join(OUTCOME_FIELDS)}) "
+            f"VALUES (?, {', '.join('?' * len(OUTCOME_FIELDS))})",
+            (mint, *(outcome.get(k) for k in OUTCOME_FIELDS)),
+        )
+
+    def outcome(self, mint: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM outcomes WHERE mint = ?", (mint,)).fetchone()
+        return dict(row) if row else None
+
+    def meta(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
 
     # ---- reads ------------------------------------------------------------
 

@@ -20,6 +20,7 @@ from radar.collectors.common import apply_snapshot, publish_tokens, to_float, to
 from radar.context import Ctx
 from radar.faillog import FailureLog
 from radar.http import SourceError
+from radar.lab import followups
 from radar.scoring.schedule import next_refresh_delay
 from radar.view import SOL_MINT, clean_text, clean_url, is_mint
 
@@ -163,6 +164,7 @@ async def refresh_batch(ctx: Ctx, batch: list[dict[str, Any]]) -> None:
             else:
                 row["miss_count"] = (row.get("miss_count") or 0) + 1
                 store.update_state(mint, miss_count=row["miss_count"], last_checked_at=now)
+            followups.record(ctx, row, now, looked_up=True, found=bool(pair))
             delay = next_refresh_delay(row, now, cfg["refresh"])
             store.update_state(mint, next_refresh_at=now + delay if delay is not None else None)
     publish_tokens(ctx, [m for m in mints if m in best], now)

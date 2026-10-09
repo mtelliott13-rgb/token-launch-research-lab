@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meme Radar: Data</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #151a21; --raised: #1b222b; --line: #252d38;
+    --ink: #e6e9ee; --ink2: #a7b0bd; --muted: #6f7a89;
+    --accent: #5aa9ff; --good: #3fb68b; --warn: #e0a339; --crit: #f0616d;
+    --up: #2bb3a3; --down: #f0616d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8; --panel: #ffffff; --raised: #f0f2f5; --line: #e1e5ea;
+      --ink: #161a20; --ink2: #4a5361; --muted: #7b8494;
+      --accent: #1f6fd1; --good: #1c8a63; --warn: #a86b00; --crit: #c9303f;
+      --up: #128a7e; --down: #c9303f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .muted { color: var(--muted); }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+  #conn, .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink2); white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mark { font-size: 10px; }
+  .mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.crit { color: var(--crit); } .mark.idle { color: var(--muted); }
+  #stats { margin-left: auto; color: var(--ink2); }
+  .nav { display: flex; gap: 4px; }
+  .nav a { padding: 2px 10px; border-radius: 999px; color: var(--ink2); text-decoration: none; }
+  .nav a:hover { color: var(--ink); }
+  .nav a[aria-current=page] { background: var(--raised); color: var(--ink); }
+
+
+  main { display: grid; gap: 12px; padding: 12px 16px; max-width: 1100px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  section > .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  section h2 { font-size: 14px; margin: 0; }
+  .head .sub { color: var(--muted); }
+  .body { padding: 10px 12px; }
+  .note { color: var(--muted); margin-top: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0; }
+  .tile .d { color: var(--ink2); }
+  table { width: 100%; border-collapse: collapse; }
+  th { color: var(--muted); font-weight: 500; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th.num { text-align: right; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td.what { width: 340px; min-width: 200px; }
+  td.what .desc { color: var(--muted); }
+  td.barcell { min-width: 120px; }
+  .bar { height: 14px; min-width: 1px; background: var(--accent); border-radius: 0 4px 4px 0; }
+  tr:hover td { background: var(--raised); }
+  .wrap { overflow-x: auto; }
+  .err { color: var(--muted); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meme Radar</h1>
+  <nav class="nav"><a href="/">Dashboard</a><a href="/data" aria-current="page">Data</a></nav>
+  <span id="conn"><span class="mark idle">●</span><span>loading</span></span>
+  <div id="stats"></div>
+</header>
+
+<main>
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <div class="head"><h2>Outcome labels</h2><span class="sub" id="labels-sub"></span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Label</th><th></th><th class="num">Tokens</th><th class="num">Share</th><th class="num" title="Tokens whose 7-day follow-up has passed, so the label can no longer change">Final</th></tr></thead>
+      <tbody id="labels"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="labels-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Outcome fields</h2><span class="sub">how many tokens have each figure so far</span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Field</th><th></th><th class="num">Tokens</th><th class="num">Share of tokens</th></tr></thead>
+      <tbody id="fields"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Follow-up checks</h2><span class="sub">each token is looked up again at these ages</span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Checkpoint</th>
+        <th class="num" title="Looked up on DexScreener in time">Done</th>
+        <th class="num" title="Taken from snapshots recorded before follow-ups existed">From old snapshots</th>
+        <th class="num" title="Looked up in time, but DexScreener did not list the token">No data</th>
+        <th class="num" title="Not looked up in time: the collector was off or behind. The figures for that checkpoint are unknown.">Skipped</th>
+        <th class="num">Coverage</th></tr></thead>
+      <tbody id="followups"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="followups-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Collector health</h2></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Source</th><th>Status</th><th class="num">Last success</th><th class="num">Errors</th><th>Last error</th><th>Details</th></tr></thead>
+      <tbody id="health"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v; else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const DASH = "–";
+const fmtInt = (v) => v == null ? DASH : Math.round(v).toLocaleString("en-US");
+const fmtShare = (n, total) => !total ? DASH : (100 * n / total).toFixed(n && n / total < 0.1 ? 1 : 0) + "%";
+function fmtAge(s) {
+  if (s == null || !isFinite(s)) return DASH;
+  s = Math.max(0, s);
+  if (s < 60) return Math.floor(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return (s / 86400).toFixed(1) + " days";
+}
+const MARKS = { ok: "✓", warn: "▲", crit: "✕", idle: "●" };
+const num = (v) => h("td", { class: "num" }, v);
+function barRow(name, desc, count, total, extra) {
+  const pct = total ? 100 * count / total : 0;
+  return h("tr", { title: `${name}: ${fmtInt(count)} of ${fmtInt(total)} tokens` },
+    h("td", { class: "what" }, h("div", null, name), desc && h("div", { class: "desc" }, desc)),
+    h("td", { class: "barcell" }, count ? h("div", { class: "bar", style: `width:${Math.max(0.3, pct)}%` }) : null),
+    num(fmtInt(count)), num(fmtShare(count, total)), extra);
+}
+
+function render(d) {
+  const o = d.outcomes, L = d.labels;
+  const span = d.first_seen_at ? d.now - d.first_seen_at : null;
+  $("tiles").replaceChildren(...[
+    ["Tokens recorded", fmtInt(d.tokens), span ? `over ${fmtAge(span)}, ${fmtInt(d.snapshots)} snapshots` : ""],
+    ["Tokens with a first price (p0)", fmtInt(o.have.p0_price), `${fmtShare(o.have.p0_price, d.tokens)} of tokens; outcomes are measured from it`],
+    ["Complete outcomes", fmtInt(o.complete), o.final ? `${fmtInt(o.final)} tokens are past day 7` : "none yet: the first tokens reach day 7 a week after collection began"],
+    ["Still being followed", fmtInt(d.followups_pending), "tokens with checkpoints still to come"],
+  ].map(([k, v, s]) => h("div", { class: "tile" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v), h("div", { class: "d" }, s))));
+
+  const by = Object.fromEntries(o.labels.map((l) => [l.label ?? "", l]));
+  const defs = [
+    ["moonshot", `peak in the first 24h was ${L.moonshot_multiple}× p0 or more`],
+    ["runner", `peak in the first 24h was ${L.runner_multiple}× to ${L.moonshot_multiple}× p0`],
+    ["rug", `price or pool liquidity fell ${L.rug_drop_pct}% within ${Math.round(L.rug_window_s / 60)} min, or RugCheck flagged it`],
+    ["dead", `24h volume under $${fmtInt(L.dead_vol_h24_usd)} at day 7`],
+    ["flat", "none of the above, once day 7 has passed"],
+    ["no_data", "we never saw a price for it"],
+    ["", "cannot tell yet: dead and flat need day 7"],
+  ];
+  const known = new Set(defs.map((x) => x[0]));
+  for (const l of o.labels) if (!known.has(l.label ?? "")) defs.push([l.label, ""]);
+  $("labels").replaceChildren(...defs.map(([key, desc]) => {
+    const l = by[key] || { count: 0, final: 0 };
+    return barRow(key || "not labelled yet", desc, l.count, o.total, num(fmtInt(l.final)));
+  }));
+  $("labels-sub").textContent = `${fmtInt(o.total)} tokens with an outcome row, ${fmtInt(o.complete)} complete`;
+  $("labels-note").textContent = `One label per token, first match from the top. ${fmtInt(o.rugged)} tokens carry the "rugged" flag in total, because a runner or moonshot that later collapsed keeps its label. Labels are provisional until a token is past day 7. p0 is the first DexScreener price we saw, usually about 90 seconds after launch. Thresholds are in config/settings.yaml.`;
+
+  const fields = [
+    ["p0_price", "First price (p0)"], ["peak_multiple_24h", "Peak multiple, first 24h (so far, until 24h has passed)"],
+    ["multiple_1h", "Multiple at 1h"], ["multiple_24h", "Multiple at 24h"], ["multiple_72h", "Multiple at 72h"],
+    ["multiple_7d", "Multiple at 7d"], ["dead_at_7d", "Dead-at-day-7 verdict"],
+  ];
+  $("fields").replaceChildren(...fields.map(([key, name]) => barRow(name, "", o.have[key] || 0, d.tokens)));
+
+  $("followups").replaceChildren(...d.followups.map((f) => {
+    const got = (f.done || 0) + (f.backfilled || 0) + (f.no_data || 0), all = got + (f.skipped || 0);
+    return h("tr", null, h("td", null, f.checkpoint), num(fmtInt(f.done || 0)), num(fmtInt(f.backfilled || 0)),
+      num(fmtInt(f.no_data || 0)), num(fmtInt(f.skipped || 0)), num(all ? fmtShare(got, all) : DASH));
+  }));
+  const s = d.since_start;
+  $("followups-note").textContent = `Since the app last started: ${fmtInt(s.done)} done, ${fmtInt(s.no_data)} no data, ${fmtInt(s.skipped)} skipped. Coverage is the share of checkpoints we have an answer for. Skipped means the collector was off or behind when the check was due, so that figure is unknown.`;
+
+  const kinds = { ok: "ok", starting: "idle", degraded: "warn", stale: "warn", down: "crit" };
+  $("health").replaceChildren(...Object.values(d.sources).map((src) => h("tr", null,
+    h("td", null, src.label),
+    h("td", null, h("span", { class: "mark " + kinds[src.status] }, MARKS[kinds[src.status]]), " " + src.status),
+    num(src.last_success == null ? "never" : fmtAge(d.now - src.last_success) + " ago"),
+    num(fmtInt(src.error_count)),
+    h("td", null, h("div", { class: "err", title: src.last_error || "" }, src.last_error || DASH)),
+    h("td", { class: "muted" }, Object.entries(src.detail || {}).map(([k, v]) => `${k}: ${v}`).join(", ")))));
+  $("stats").textContent = `counts as of ${fmtAge(d.now - d.as_of)} ago`;
+}
+async function load() {
+  try {
+    const res = await fetch("/api/data");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    render(await res.json());
+    $("conn").replaceChildren(h("span", { class: "mark ok" }, MARKS.ok), h("span", null, "up to date"));
+  } catch (err) {
+    $("conn").replaceChildren(h("span", { class: "mark crit" }, MARKS.crit), h("span", null, "could not reach the app (restart it if it was started before this page existed)"));
+  }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

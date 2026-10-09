@@ -28,6 +28,14 @@ Run the tests with `uv run pytest`.
 - **Social**: placeholder showing links from DexScreener token profiles.
 - **Header chips**: the health of each data collector. Hover one for details.
 
+## The Data page
+
+http://localhost:8000/data shows what has been collected for the strategy lab: how many tokens
+are recorded, how many have outcomes and which label each got (rug, dead, flat, runner,
+moonshot), how complete the follow-up checks are, and collector health. Every token is looked
+up again 1m, 5m, 15m, 1h, 4h, 24h, 72h and 7d after it is first seen, so outcomes only become
+complete once a token is a week old.
+
 ## Data sources (all free, no keys)
 
 | Source | Used for |
