@@ -5,6 +5,7 @@ import time
 
 import httpx
 import pytest
+import websockets
 
 from radar.collectors import dexscreener, geckoterminal, pumpportal
 from radar.collectors.rugcheck import SafetyService
@@ -113,6 +114,24 @@ def test_dexscreener_refresh_records_snapshot_score_and_schedule():
     assert events and events[0][0] == "tokens" and {r["mint"] for r in events[0][1]} == {FRANK, FIX}
 
 
+def test_score_counts_age_from_graduation_not_creation():
+    """A just-graduated token's new pool has minutes of history, however old the token is."""
+    def scored(migrated_ago_s):
+        async def flow(ctx):
+            now = time.time()
+            ctx.store.upsert_token(FRANK, source="pumpportal", first_seen_at=now - 7200, created_at=now - 7200)
+            ctx.store.update_state(FRANK, migrated_at=now - migrated_ago_s)
+            ctx.store.schedule_refresh(FRANK, now - 1)
+            await dexscreener.refresh_batch(ctx, ctx.store.due(now, 30))
+            return ctx.store.row(FRANK)
+
+        return run(lambda r: httpx.Response(200, json=[DEX_GRADUATED]), flow)[0]
+
+    assert scored(60)["score"] is None                       # pool is 1 minute old: too young to rank
+    ten_min = scored(600)                                    # 2 five-minute windows, not 12
+    assert ten_min["vol_accel"] == pytest.approx(6292.08 * 2 / 70188.03, abs=0.001)
+
+
 def test_dexscreener_rejected_batch_is_pushed_back_not_retried_forever():
     async def flow(ctx):
         now = time.time()
@@ -189,3 +208,33 @@ def test_safety_fetch_stores_report_and_then_serves_from_cache():
     row = ctx.store.row(FRANK)
     assert row["safety_ts"] and row["top10_pct"] == 5.41 and row["mint_authority_enabled"] == 0
     assert events[-1][0] == "tokens"
+
+
+def test_pumpportal_reconnects_after_the_connection_drops():
+    """The stream must survive disconnects: the fake server hangs up after every message."""
+    mints = [FIX, FRANK, "7bi4ZRS2QjmA5STnS26YaAPyWpgqFo4M8vJCNNhnpump"]
+    connections = []
+
+    async def flow(ctx):
+        async def server(ws):
+            subscriptions = [json.loads(await ws.recv())["method"], json.loads(await ws.recv())["method"]]
+            connections.append(subscriptions)
+            await ws.send(json.dumps({**CREATE, "mint": mints[len(connections) - 1]}))
+            await ws.close()
+
+        async with websockets.serve(server, "127.0.0.1", 0) as srv:
+            port = srv.sockets[0].getsockname()[1]
+            ctx.cfg["sources"]["pumpportal"].update(url=f"ws://127.0.0.1:{port}", reconnect_min_s=0.01, reconnect_max_s=0.05)
+            task = asyncio.create_task(pumpportal.run(ctx))
+            for _ in range(400):
+                if ctx.store.counts()["tokens"] >= 3:
+                    break
+                await asyncio.sleep(0.05)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    _, ctx, _ = run(no_http, flow)
+    assert ctx.store.counts()["tokens"] == 3                     # one token per connection: it reconnected twice
+    assert all(subs == ["subscribeNewToken", "subscribeMigration"] for subs in connections)
+    health = ctx.health.snapshot()["pumpportal"]
+    assert health["error_count"] >= 2 and health["detail"]["reconnects"] >= 2

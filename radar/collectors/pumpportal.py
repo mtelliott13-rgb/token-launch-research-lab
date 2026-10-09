@@ -112,7 +112,11 @@ async def run(ctx: Ctx) -> None:
     while True:
         try:
             async with websockets.connect(
-                cfg["url"], ssl=SSL_CONTEXT, open_timeout=20, ping_interval=20, ping_timeout=20
+                cfg["url"],
+                ssl=SSL_CONTEXT if cfg["url"].startswith("wss://") else None,
+                open_timeout=20,
+                ping_interval=20,
+                ping_timeout=20,
             ) as ws:
                 await ws.send(json.dumps({"method": "subscribeNewToken"}))
                 await ws.send(json.dumps({"method": "subscribeMigration"}))

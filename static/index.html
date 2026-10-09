@@ -1,1 +1,626 @@
-<!doctype html><title>Meme Radar</title><p>Dashboard coming next.</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meme Radar</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #151a21; --raised: #1b222b; --line: #252d38;
+    --ink: #e6e9ee; --ink2: #a7b0bd; --muted: #6f7a89;
+    --accent: #5aa9ff; --good: #3fb68b; --warn: #e0a339; --crit: #f0616d;
+    --up: #2bb3a3; --down: #f0616d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8; --panel: #ffffff; --raised: #f0f2f5; --line: #e1e5ea;
+      --ink: #161a20; --ink2: #4a5361; --muted: #7b8494;
+      --accent: #1f6fd1; --good: #1c8a63; --warn: #a86b00; --crit: #c9303f;
+      --up: #128a7e; --down: #c9303f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .muted { color: var(--muted); }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+  #conn, .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink2); white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mark { font-size: 10px; }
+  .mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.crit { color: var(--crit); } .mark.idle { color: var(--muted); }
+  #stats { margin-left: auto; color: var(--ink2); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 12px 16px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .col { display: grid; gap: 12px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  section > .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  section h2 { font-size: 14px; margin: 0; }
+  .head .sub { color: var(--muted); }
+  .head .right { margin-left: auto; }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+  .filters label { display: inline-flex; align-items: center; gap: 6px; }
+  .filters input[type=number] { width: 84px; padding: 3px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
+  .btn { padding: 3px 10px; background: var(--raised); border: 1px solid var(--line); border-radius: 5px; cursor: pointer; }
+  .btn:hover { border-color: var(--muted); }
+  .btn[aria-pressed=true] { border-color: var(--accent); }
+
+  .scroll { max-height: calc(100vh - 190px); overflow: auto; }
+  .scroll.short { max-height: 420px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { position: sticky; top: 0; z-index: 1; background: var(--panel); color: var(--muted); font-weight: 500; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th.num { text-align: right; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr:focus-visible { background: var(--raised); outline: none; }
+  .tok { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .tok img { width: 20px; height: 20px; border-radius: 50%; flex: none; }
+  .tok .names { min-width: 0; }
+  .tok .sym { font-weight: 600; }
+  .tok .name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 4px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
+  .empty { padding: 22px 12px; color: var(--muted); text-align: center; }
+
+  .score { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 6px; min-width: 74px; }
+  #rising-table th, #rising-table td { padding-left: 7px; padding-right: 7px; }
+  .tok .badges { margin-top: 3px; }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
+  details.how { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+  details.how summary { cursor: pointer; color: var(--ink); }
+  details.how ul { margin: 6px 0 0; padding-left: 18px; }
+  details.how li { margin: 3px 0; }
+
+  .social { list-style: none; margin: 0; padding: 0; }
+  .social li { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+  .social .who { cursor: pointer; font-weight: 600; background: none; border: 0; padding: 0; }
+  .social .who:hover { text-decoration: underline; }
+  .social .links { margin-left: auto; display: flex; gap: 10px; white-space: nowrap; }
+
+  #scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: none; z-index: 9; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); background: var(--panel); border-left: 1px solid var(--line); transform: translateX(100%); transition: transform .15s ease-out; overflow: auto; z-index: 10; }
+  body.open #drawer { transform: none; } body.open #scrim { display: block; }
+  #drawer .top { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px 8px; }
+  #drawer h3 { margin: 0; font-size: 17px; }
+  #drawer .block { padding: 10px 16px; border-top: 1px solid var(--line); }
+  #drawer h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .mint { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink2); word-break: break-all; }
+  #chart { height: 260px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; }
+  .grid .k { color: var(--muted); font-size: 11.5px; }
+  .grid .v { font-variant-numeric: tabular-nums; }
+  .risks { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+  .risks li { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; }
+  .risks .desc { grid-column: 2; color: var(--muted); }
+  .linkrow { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+  .note { color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meme Radar</h1>
+  <span id="conn"><span class="mark idle">●</span><span>connecting</span></span>
+  <div id="sources" class="chips" aria-label="Collector health"></div>
+  <div id="stats"></div>
+</header>
+
+<main>
+  <div class="col">
+    <section>
+      <div class="head">
+        <h2>New launches</h2><span class="sub" id="launch-count"></span>
+        <button class="btn right" id="pause" aria-pressed="false">Pause</button>
+      </div>
+      <div class="filters">
+        <label>Min liquidity $ <input id="f-liq" type="number" min="0" step="1000"></label>
+        <label>Max top-10 holders % <input id="f-top10" type="number" min="0" max="100" step="5"></label>
+        <label><input id="f-auth" type="checkbox"> Hide if mint or freeze authority enabled</label>
+        <label><input id="f-grad" type="checkbox"> Graduated only</label>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th class="num">Age</th><th>Token</th><th class="num">Market cap</th><th class="num">Liquidity</th><th class="num">Buys / sells (5m)</th><th>Flags</th></tr></thead>
+          <tbody id="launch-body"></tbody>
+        </table>
+        <div class="empty" id="launch-empty">Waiting for the first tokens…</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section id="watch-panel" hidden>
+      <div class="head"><h2>Watching</h2><span class="sub">refreshed every <span id="watch-s">10</span> seconds</span></div>
+      <table>
+        <thead><tr><th>Token</th><th class="num">Price</th><th class="num">5m</th><th class="num">Market cap</th><th class="num">Buys / sells (5m)</th></tr></thead>
+        <tbody id="watch-body"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <div class="head"><h2>Rising</h2><span class="sub">ranked by momentum score v0</span></div>
+      <details class="how">
+        <summary>How the score works</summary>
+        <ul id="how-list"></ul>
+      </details>
+      <div class="scroll short">
+        <table id="rising-table">
+          <thead><tr><th class="num">#</th><th style="width:100%">Token</th><th title="Momentum score, 0 to 100. 50 means steady.">Score</th><th class="num" title="Volume acceleration: 5-minute volume vs the hourly average">Vol</th><th class="num" title="Buy pressure: share of the last 5 minutes' trades that were buys">Buys</th><th class="num" title="Transaction growth: 5-minute trade count vs the hourly average">Txns</th><th class="num" title="Market cap">Mcap</th></tr></thead>
+          <tbody id="rising-body"></tbody>
+        </table>
+        <div class="empty" id="rising-empty">Nothing qualifies yet. This fills in a few minutes after starting.</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="head"><h2>Social</h2><span class="sub">placeholder: links from DexScreener token profiles. Telegram arrives in Phase 3.</span></div>
+      <div class="scroll short"><ul class="social" id="social-list"></ul><div class="empty" id="social-empty">No profiles seen yet.</div></div>
+    </section>
+  </div>
+</main>
+
+<div id="scrim"></div>
+<aside id="drawer" aria-label="Token details" aria-hidden="true">
+  <div class="top">
+    <div style="min-width:0;flex:1">
+      <h3 id="d-title"></h3>
+      <div class="mint" id="d-mint"></div>
+      <div class="badges" id="d-badges" style="margin-top:8px"></div>
+    </div>
+    <button class="btn" id="d-watch" aria-pressed="false">Watch</button>
+    <button class="btn" id="d-close" aria-label="Close">✕</button>
+  </div>
+  <div class="block">
+    <h4>Price in USD, 1-minute candles (GeckoTerminal)</h4>
+    <div id="chart"></div>
+    <div class="note" id="chart-note"></div>
+  </div>
+  <div class="block"><h4>Market</h4><div class="grid" id="d-stats"></div>
+    <div class="note" id="d-watch-note"></div></div>
+  <div class="block"><h4>Safety report (RugCheck)</h4><div id="d-safety" class="muted">Loading…</div></div>
+  <div class="block"><h4>Links</h4><div class="linkrow" id="d-links"></div>
+    <div class="note">Twitter, Telegram and website links are set by the token's creator and are not verified.</div></div>
+</aside>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+"use strict";
+// Token names, symbols and links are written by anonymous token creators. Everything is
+// rendered through textContent / setAttribute (never innerHTML), and links must be http(s).
+
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---- formatting ------------------------------------------------------------
+const DASH = "–";
+function fmtUsd(v) {
+  if (v == null) return DASH;
+  const a = Math.abs(v);
+  if (a >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B";
+  if (a >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M";
+  if (a >= 1e3) return "$" + (v / 1e3).toFixed(1) + "K";
+  return "$" + v.toFixed(a >= 100 ? 0 : 2);
+}
+function priceDigits(v) { return Math.min(12, Math.max(2, Math.ceil(-Math.log10(Math.abs(v) || 1)) + 3)); }
+function fmtPrice(v) { return v == null ? DASH : "$" + Number(v).toFixed(priceDigits(v)); }
+function fmtPct(v) { return v == null ? DASH : (v > 0 ? "+" : "") + v.toFixed(1) + "%"; }
+function fmtInt(v) { return v == null ? DASH : Math.round(v).toLocaleString("en-US"); }
+function fmtAge(s) {
+  if (s == null || !isFinite(s)) return DASH;
+  s = Math.max(0, s);
+  if (s < 60) return Math.floor(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d";
+}
+function buysSells(r) { return r.buys_m5 == null ? DASH : `${fmtInt(r.buys_m5)} / ${fmtInt(r.sells_m5)}`; }
+function safeUrl(u) {
+  try { const p = new URL(u); return p.protocol === "https:" || p.protocol === "http:" ? p.href : null; } catch { return null; }
+}
+// Only load images from the data providers' own CDNs, never from creator-chosen hosts.
+const IMAGE_HOSTS = new Set(["cdn.dexscreener.com", "assets.geckoterminal.com", "coin-images.coingecko.com"]);
+function tokenImage(r) {
+  try { return r.image_url && IMAGE_HOSTS.has(new URL(r.image_url).hostname) ? r.image_url : null; } catch { return null; }
+}
+
+// ---- shared cells ----------------------------------------------------------
+const MARKS = { ok: "✓", warn: "▲", crit: "✕", idle: "●", info: "◆" };
+function badge(kind, label, title) {
+  return h("span", { class: "badge", title }, h("span", { class: "mark " + (kind === "info" ? "idle" : kind) }, MARKS[kind]), label);
+}
+function flags(r) {
+  const out = [];
+  if (r.rugged) out.push(badge("crit", "Rugged", "RugCheck has flagged this token as rugged"));
+  if (r.paid_boost) out.push(badge("warn", "Paid boost", "Paid promotion on DexScreener. This is advertising, not organic interest."));
+  if (r.trending_rank) out.push(badge("info", "Trending #" + r.trending_rank, "On GeckoTerminal's Solana trending list"));
+  if (r.graduated) out.push(badge("info", "Graduated", "Off the bonding curve: it has a real liquidity pool"));
+  if (r.safety_ts == null) {
+    out.push(badge("idle", "Unchecked", "No safety report yet. Open the token to fetch one."));
+  } else {
+    if (r.mint_authority_enabled) out.push(badge("crit", "Mint authority", "The creator can still mint more tokens"));
+    if (r.freeze_authority_enabled) out.push(badge("crit", "Freeze authority", "The creator can freeze holders' tokens"));
+    if (!r.mint_authority_enabled && !r.freeze_authority_enabled) out.push(badge("ok", "Authorities revoked", "Mint and freeze authority are both disabled"));
+    if (r.top10_pct != null) {
+      const kind = r.top10_pct > 50 ? "crit" : r.top10_pct > 30 ? "warn" : "ok";
+      out.push(badge(kind, `Top 10: ${r.top10_pct.toFixed(0)}%`, "Share of supply held by the 10 largest holders, excluding liquidity pools"));
+    }
+  }
+  return h("div", { class: "badges" }, out);
+}
+function liquidityCell(r) {
+  if (r.liquidity_usd != null) return fmtUsd(r.liquidity_usd);
+  if (r.graduated) return DASH;  // just graduated; the new pool's figure arrives within seconds
+  return h("span", { class: "muted", title: "Still on a bonding curve: there is no liquidity pool yet" }, "on curve");
+}
+function tokenCell(r, withImage, withFlags) {
+  const img = withImage && tokenImage(r);
+  return h("div", { class: "tok" },
+    img && h("img", { src: img, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }),
+    h("div", { class: "names" },
+      h("div", { class: "sym" }, r.symbol || "?"),
+      h("div", { class: "name" }, r.name || ""),
+      withFlags && flags(r)));
+}
+function rowEl(r, cells) {
+  return h("tr", { "data-mint": r.mint, tabindex: "0" }, cells);
+}
+function wireRows(tbody) {
+  const open = (e) => { const tr = e.target.closest("tr[data-mint]"); if (tr) openDrawer(tr.dataset.mint); };
+  tbody.addEventListener("click", open);
+  tbody.addEventListener("keydown", (e) => { if (e.key === "Enter") open(e); });
+}
+
+// ---- state -----------------------------------------------------------------
+const state = {
+  cfg: null, limit: 200, paused: false, dirty: { launches: true, rising: true, watch: true },
+  filters: { liq: 0, top10: 100, auth: false, grad: false },
+  launches: new Map(), rising: [], watching: new Map(),
+  drawer: null, serverOffset: 0,
+};
+const nowS = () => Date.now() / 1000 + state.serverOffset;
+
+function passes(r) {
+  const f = state.filters;
+  if (f.liq > 0 && (r.liquidity_usd || 0) < f.liq) return false;
+  if (f.top10 < 100 && r.top10_pct != null && r.top10_pct > f.top10) return false;
+  if (f.auth && (r.mint_authority_enabled || r.freeze_authority_enabled)) return false;
+  if (f.grad && !r.graduated) return false;
+  return true;
+}
+function ingest(rows) {
+  for (const r of rows) {
+    if (r.created_at != null && passes(r)) state.launches.set(r.mint, r); else state.launches.delete(r.mint);
+    const i = state.rising.findIndex((x) => x.mint === r.mint);
+    if (i >= 0) { state.rising[i] = r; state.dirty.rising = true; }
+    if (r.watched) state.watching.set(r.mint, r); else if (state.watching.delete(r.mint)) state.dirty.watch = true;
+    if (r.watched) state.dirty.watch = true;
+    if (state.drawer && state.drawer.mint === r.mint) renderDrawerToken(r);
+  }
+  state.dirty.launches = true;
+}
+
+// ---- panels ----------------------------------------------------------------
+function renderLaunches() {
+  const rows = [...state.launches.values()].sort((a, b) => b.created_at - a.created_at);
+  for (const r of rows.slice(state.limit)) state.launches.delete(r.mint);
+  const shown = rows.slice(0, state.limit), now = nowS();
+  $("launch-body").replaceChildren(...shown.map((r) => rowEl(r, [
+    h("td", { class: "num age", "data-ts": r.created_at }, fmtAge(now - r.created_at)),
+    h("td", null, tokenCell(r, false)),
+    h("td", { class: "num" }, fmtUsd(r.mcap)),
+    h("td", { class: "num" }, liquidityCell(r)),
+    h("td", { class: "num" }, buysSells(r)),
+    h("td", null, flags(r)),
+  ])));
+  $("launch-empty").hidden = shown.length > 0;
+  $("launch-count").textContent = shown.length ? `${shown.length} newest${state.paused ? " (paused)" : ""}` : "";
+}
+function renderRising() {
+  // Scores update between ranking pushes, so keep the visible order consistent with them.
+  state.rising = state.rising.filter((r) => r.score != null).sort((a, b) => b.score - a.score);
+  $("rising-body").replaceChildren(...state.rising.map((r, i) => rowEl(r, [
+    h("td", { class: "num muted" }, i + 1),
+    h("td", null, tokenCell(r, true, true)),
+    h("td", null, h("div", { class: "score", title: "Momentum score, 0 to 100. 50 means steady." },
+      h("span", { class: "num" }, r.score == null ? DASH : r.score.toFixed(1)),
+      h("div", { class: "bar" }, h("i", { style: `width:${Math.max(0, Math.min(100, r.score || 0))}%` })))),
+    h("td", { class: "num" }, r.vol_accel == null ? DASH : r.vol_accel.toFixed(2) + "×"),
+    h("td", { class: "num" }, r.buy_pressure == null ? DASH : (r.buy_pressure * 100).toFixed(0) + "%"),
+    h("td", { class: "num" }, r.txn_growth == null ? DASH : r.txn_growth.toFixed(2) + "×"),
+    h("td", { class: "num" }, fmtUsd(r.mcap)),
+  ])));
+  $("rising-empty").hidden = state.rising.length > 0;
+}
+function renderWatching() {
+  const rows = [...state.watching.values()];
+  $("watch-panel").hidden = rows.length === 0;
+  $("watch-body").replaceChildren(...rows.map((r) => rowEl(r, [
+    h("td", null, tokenCell(r, true)),
+    h("td", { class: "num" }, fmtPrice(r.price_usd)),
+    h("td", { class: "num" }, fmtPct(r.price_chg_m5)),
+    h("td", { class: "num" }, fmtUsd(r.mcap)),
+    h("td", { class: "num" }, buysSells(r)),
+  ])));
+}
+function renderSocial(rows) {
+  $("social-empty").hidden = rows.length > 0;
+  $("social-list").replaceChildren(...rows.map((r) => {
+    const links = [["Twitter", r.twitter], ["Telegram", r.telegram], ["Website", r.website]]
+      .map(([label, url]) => [label, safeUrl(url)]).filter(([, url]) => url)
+      .map(([label, url]) => h("a", { href: url, target: "_blank", rel: "noopener noreferrer nofollow" }, label));
+    return h("li", null,
+      h("button", { class: "who", onclick: () => openDrawer(r.mint) }, r.symbol || "?"),
+      h("span", { class: "muted" }, r.name || ""),
+      h("span", { class: "links" }, links.length ? links : h("span", { class: "muted" }, "no links")));
+  }));
+}
+function renderStatus(s) {
+  state.serverOffset = s.now - Date.now() / 1000;
+  const kinds = { ok: "ok", starting: "idle", degraded: "warn", stale: "warn", down: "crit" };
+  $("sources").replaceChildren(...Object.values(s.sources).map((src) => {
+    const age = src.last_success == null ? "no data yet" : fmtAge(s.now - src.last_success) + " ago";
+    const detail = Object.entries(src.detail || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+    const title = [`Status: ${src.status}`, `Last success: ${age}`, `Errors: ${src.error_count}`,
+      src.last_error && `Last error: ${src.last_error}`, detail].filter(Boolean).join("\n");
+    return h("span", { class: "chip", title },
+      h("span", { class: "mark " + kinds[src.status] }, MARKS[kinds[src.status]]), `${src.label}: ${src.status}`);
+  }));
+  const c = s.counts || {};
+  $("stats").textContent = [s.sol_price_usd && `SOL $${s.sol_price_usd.toFixed(2)}`, c.tokens != null && `${fmtInt(c.tokens)} tokens recorded`,
+    c.snapshots != null && `${fmtInt(c.snapshots)} snapshots`].filter(Boolean).join("  ·  ");
+}
+function renderHow(cfg) {
+  const w = cfg.momentum.weights, r = cfg.rising;
+  const pct = (x) => Math.round(100 * x / (w.volume_acceleration + w.buy_pressure + w.txn_growth)) + "%";
+  $("how-list").replaceChildren(...[
+    `Volume acceleration (${pct(w.volume_acceleration)} of the score): the last 5 minutes of volume compared with the average 5 minutes over the last hour, (5m volume × 12) ÷ 1h volume. Above 1× means trading is speeding up.`,
+    `Buy pressure (${pct(w.buy_pressure)}): buys ÷ (buys + sells) in the last 5 minutes.`,
+    `Transaction growth (${pct(w.txn_growth)}): trades in the last 5 minutes compared with the average 5 minutes over the last hour.`,
+    `For tokens younger than an hour, the hourly average only counts the 5-minute windows the token has existed for, so new tokens are not flattered. A token that just graduated counts as new again, because its new pool's history starts at graduation.`,
+    `Each ratio r is squashed to r ÷ (1 + r), then the three are combined into a 0 to 100 score. 50 means steady trading with balanced buying and selling.`,
+    `To be listed a token needs: at least ${r.min_age_min} minutes of age, at least ${r.min_txns_m5} trades in the last 5 minutes, and at least ${fmtUsd(r.min_liquidity_usd)} of liquidity (or ${fmtUsd(r.min_curve_mcap_usd)} market cap if it is still on a bonding curve, where there is no pool to measure).`,
+    `This is version 0. The weights live in config/settings.yaml and have not been tested against outcomes yet. Paid boosts never raise the score.`,
+  ].map((t) => h("li", null, t)));
+  $("watch-s").textContent = cfg.refresh.watched_s;
+}
+
+// ---- drawer ----------------------------------------------------------------
+function kv(k, v) { return h("div", null, h("div", { class: "k" }, k), h("div", { class: "v" }, v)); }
+function renderDrawerToken(r) {
+  const d = state.drawer; if (!d) return;
+  d.token = r;
+  $("d-title").textContent = `${r.symbol || "?"}  ·  ${r.name || ""}`;
+  $("d-mint").textContent = r.mint;
+  $("d-badges").replaceChildren(flags(r));
+  $("d-watch").textContent = r.watched ? "Watching ✓" : "Watch";
+  $("d-watch").setAttribute("aria-pressed", String(!!r.watched));
+  $("d-watch-note").textContent = r.watched
+    ? `Watching: price and buy/sell counts refresh every ${state.cfg ? state.cfg.refresh.watched_s : 10} seconds. Individual trades are not shown because no free source provides them.`
+    : "";
+  $("d-stats").replaceChildren(
+    kv("Price", fmtPrice(r.price_usd)), kv("Market cap", fmtUsd(r.mcap)),
+    kv("Liquidity", liquidityCell(r)),
+    kv("Volume 5m", fmtUsd(r.vol_m5)), kv("Volume 1h", fmtUsd(r.vol_h1)), kv("Volume 24h", fmtUsd(r.vol_h24)),
+    kv("Buys / sells 5m", buysSells(r)),
+    kv("Buys / sells 1h", r.buys_h1 == null ? DASH : `${fmtInt(r.buys_h1)} / ${fmtInt(r.sells_h1)}`),
+    kv("Price change 5m / 1h", `${fmtPct(r.price_chg_m5)} / ${fmtPct(r.price_chg_h1)}`),
+    kv("Age", fmtAge(r.created_at == null ? null : nowS() - r.created_at)),
+    kv("Venue", r.dex_id || DASH), kv("Launchpad", r.launchpad || DASH),
+    kv("Momentum score", r.score == null ? "not ranked" : r.score.toFixed(1)),
+    kv("First seen via", r.source), kv("Data as of", r.snapshot_ts ? fmtAge(nowS() - r.snapshot_ts) + " ago" : DASH));
+  const m = encodeURIComponent(r.mint);
+  const ext = [["Twitter", safeUrl(r.twitter)], ["Telegram", safeUrl(r.telegram)], ["Website", safeUrl(r.website)],
+    ["DexScreener", `https://dexscreener.com/solana/${m}`], ["Solscan", `https://solscan.io/token/${m}`],
+    ["RugCheck", `https://rugcheck.xyz/tokens/${m}`], (r.launchpad === "pump.fun" || r.dex_id === "pumpfun" || r.dex_id === "pumpswap") && ["pump.fun", `https://pump.fun/coin/${m}`]];
+  $("d-links").replaceChildren(...ext.filter((x) => x && x[1]).map(([label, url]) =>
+    h("a", { href: url, target: "_blank", rel: "noopener noreferrer nofollow" }, label + " ↗")));
+}
+function renderSafety(s, note) {
+  const box = $("d-safety");
+  if (!s) { box.className = "muted"; box.textContent = note || "No safety report available."; return; }
+  const yes = (on, bad, good) => on ? badge("crit", bad) : badge("ok", good);
+  const level = (l) => ({ danger: "crit", warn: "warn" }[l] || "idle");
+  box.className = "";
+  box.replaceChildren(
+    h("div", { class: "grid" },
+      kv("Mint authority", yes(s.mint_authority_enabled, "Enabled", "Revoked")),
+      kv("Freeze authority", yes(s.freeze_authority_enabled, "Enabled", "Revoked")),
+      kv("Flagged as rugged", yes(s.rugged, "Yes", "No")),
+      kv("Top 10 holders", s.top10_pct == null ? DASH : s.top10_pct.toFixed(1) + "%"),
+      kv("Largest holder", s.top_holder_pct == null ? DASH : s.top_holder_pct.toFixed(1) + "%"),
+      kv("LP locked or burned", s.lp_locked_pct == null ? DASH : s.lp_locked_pct.toFixed(0) + "%"),
+      kv("RugCheck risk score", s.risk_score_normalised == null ? DASH : `${s.risk_score_normalised} of 100 (lower is safer)`),
+      kv("Holders", fmtInt(s.total_holders)),
+      kv("Insider wallets detected", fmtInt(s.insiders_detected))),
+    h("div", { class: "note" }, "Holder figures exclude liquidity pools and the bonding curve. Checked " + fmtAge(nowS() - s.ts) + " ago." + (note ? " " + note : "")),
+    s.risks.length
+      ? h("ul", { class: "risks" }, s.risks.map((r) => h("li", null,
+          badge(level(r.level), r.level || "note"), h("span", null, r.name + (r.value ? ` (${r.value})` : "")),
+          h("span", { class: "desc" }, r.description))))
+      : h("div", { class: "note" }, "RugCheck lists no specific risks."));
+}
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+async function loadChart(mint) {
+  const d = state.drawer; if (!d || d.mint !== mint) return;
+  if (!window.LightweightCharts) { $("chart-note").textContent = "The chart library could not be loaded (it comes from a CDN, so it needs an internet connection)."; return; }
+  let data;
+  try { data = await api(`/api/token/${mint}/ohlcv`); } catch { data = { candles: [], note: "Could not load chart data." }; }
+  if (!state.drawer || state.drawer.mint !== mint) return;
+  $("chart-note").textContent = data.note || (data.candles.length ? "" : "No candles yet.");
+  if (!data.candles.length) return;
+  if (!d.chart) {
+    d.chart = LightweightCharts.createChart($("chart"), {
+      autoSize: true,
+      layout: { background: { color: "transparent" }, textColor: cssVar("--ink2"), fontSize: 11 },
+      grid: { vertLines: { color: cssVar("--line") }, horzLines: { color: cssVar("--line") } },
+      rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    });
+    d.series = d.chart.addCandlestickSeries({
+      upColor: cssVar("--up"), downColor: cssVar("--down"), wickUpColor: cssVar("--up"), wickDownColor: cssVar("--down"), borderVisible: false,
+    });
+    d.fit = true;
+  }
+  const digits = priceDigits(data.candles[data.candles.length - 1].close);
+  d.series.applyOptions({ priceFormat: { type: "price", precision: digits, minMove: Math.pow(10, -digits) } });
+  d.series.setData(data.candles);
+  if (d.fit) { d.chart.timeScale().fitContent(); d.fit = false; }
+}
+async function openDrawer(mint) {
+  closeDrawer();
+  const d = state.drawer = { mint, chart: null, series: null, timer: null };
+  history.replaceState(null, "", "#token=" + mint);
+  document.body.classList.add("open");
+  $("drawer").setAttribute("aria-hidden", "false");
+  $("d-title").textContent = "Loading…"; $("d-mint").textContent = mint;
+  $("d-safety").className = "muted"; $("d-safety").textContent = "Fetching safety report…";
+  $("chart-note").textContent = "Loading chart…";
+  try {
+    const info = await api(`/api/token/${mint}`);
+    if (state.drawer !== d) return;
+    renderDrawerToken(info.token);
+    if (info.safety) renderSafety(info.safety, "Refreshing…");
+  } catch { $("d-title").textContent = "Could not load this token"; return; }
+  loadChart(mint);
+  d.timer = setInterval(() => loadChart(mint), 46000);
+  try {
+    const res = await api(`/api/token/${mint}/safety`);
+    if (state.drawer === d) renderSafety(res.safety, res.note);
+  } catch { if (state.drawer === d) renderSafety(null, "Could not load the safety report."); }
+}
+function closeDrawer() {
+  const d = state.drawer; if (!d) return;
+  clearInterval(d.timer);
+  if (d.chart) d.chart.remove();
+  $("chart").replaceChildren();
+  state.drawer = null;
+  history.replaceState(null, "", location.pathname);
+  document.body.classList.remove("open");
+  $("drawer").setAttribute("aria-hidden", "true");
+}
+$("d-close").addEventListener("click", closeDrawer);
+$("scrim").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+$("d-watch").addEventListener("click", async () => {
+  const d = state.drawer; if (!d || !d.token) return;
+  try {
+    const row = await api(`/api/token/${d.mint}/watch`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ watched: !d.token.watched }),
+    });
+    ingest([row]);
+  } catch { /* the button simply stays as it was */ }
+});
+
+// ---- filters ---------------------------------------------------------------
+function readFilters() {
+  state.filters = {
+    liq: Math.max(0, Number($("f-liq").value) || 0),
+    top10: $("f-top10").value === "" ? 100 : Math.max(0, Math.min(100, Number($("f-top10").value))),
+    auth: $("f-auth").checked, grad: $("f-grad").checked,
+  };
+  try { localStorage.setItem("radar.filters", JSON.stringify(state.filters)); } catch { /* private mode */ }
+}
+function writeFilters(f) {
+  $("f-liq").value = f.liq || ""; $("f-top10").value = f.top10 < 100 ? f.top10 : "";
+  $("f-auth").checked = !!f.auth; $("f-grad").checked = !!f.grad;
+}
+async function loadLaunches() {
+  const f = state.filters;
+  const q = new URLSearchParams({ limit: state.limit, min_liquidity_usd: f.liq, max_top10_pct: f.top10, hide_authority: f.auth, graduated_only: f.grad });
+  const rows = await api("/api/launches?" + q);
+  state.launches = new Map(rows.map((r) => [r.mint, r]));
+  state.dirty.launches = true;
+  renderLaunches();
+}
+let filterTimer;
+for (const id of ["f-liq", "f-top10", "f-auth", "f-grad"]) {
+  $(id).addEventListener("input", () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => { readFilters(); loadLaunches().catch(() => {}); }, 250);
+  });
+}
+$("pause").addEventListener("click", () => {
+  state.paused = !state.paused;
+  $("pause").textContent = state.paused ? "Resume" : "Pause";
+  $("pause").setAttribute("aria-pressed", String(state.paused));
+  state.dirty.launches = true;
+  if (state.paused) renderLaunches();
+});
+
+// ---- live updates ----------------------------------------------------------
+function setConn(kind, text) {
+  $("conn").replaceChildren(h("span", { class: "mark " + kind }, MARKS[kind]), h("span", null, text));
+}
+async function loadAll() {
+  const [rising, watching, social, status] = await Promise.all([
+    api("/api/rising"), api("/api/watching"), api("/api/social"), api("/api/status"), loadLaunches(),
+  ]);
+  state.rising = rising; state.watching = new Map(watching.map((r) => [r.mint, r]));
+  state.dirty.rising = state.dirty.watch = true;
+  renderSocial(social); renderStatus(status);
+}
+function connect() {
+  const es = new EventSource("/api/stream");
+  let first = true;
+  es.onopen = () => { setConn("ok", "live"); if (!first) loadAll().catch(() => {}); first = false; };
+  es.onerror = () => setConn("crit", "disconnected, retrying");
+  es.addEventListener("tokens", (e) => ingest(JSON.parse(e.data)));
+  es.addEventListener("rising", (e) => { state.rising = JSON.parse(e.data); state.dirty.rising = true; });
+  es.addEventListener("status", (e) => renderStatus(JSON.parse(e.data)));
+}
+setInterval(() => {
+  if (state.dirty.launches && !state.paused) { state.dirty.launches = false; renderLaunches(); }
+  else { const now = nowS(); for (const td of document.querySelectorAll("td.age")) td.textContent = fmtAge(now - Number(td.dataset.ts)); }
+  if (state.dirty.rising) { state.dirty.rising = false; renderRising(); }
+  if (state.dirty.watch) { state.dirty.watch = false; renderWatching(); }
+}, 1000);
+setInterval(() => api("/api/social").then(renderSocial).catch(() => {}), 60000);
+
+(async function start() {
+  for (const id of ["launch-body", "rising-body", "watch-body"]) wireRows($(id));
+  try {
+    state.cfg = await api("/api/config");
+    state.limit = state.cfg.dashboard.launches_limit;
+    const d = state.cfg.dashboard.default_filters;
+    let f = { liq: d.min_liquidity_usd, top10: d.max_top10_pct, auth: d.hide_authority, grad: d.graduated_only };
+    try { f = { ...f, ...JSON.parse(localStorage.getItem("radar.filters") || "{}") }; } catch { /* ignore bad saved filters */ }
+    state.filters = f; writeFilters(f);
+    renderHow(state.cfg);
+    await loadAll();
+  } catch (err) {
+    setConn("crit", "could not reach the app");
+    console.error(err);
+  }
+  connect();
+  // A link like /#token=<mint> opens straight to that token.
+  const linked = /^#token=([1-9A-HJ-NP-Za-km-z]{32,44})$/.exec(location.hash);
+  if (linked) openDrawer(linked[1]);
+})();
+</script>
+</body>
+</html>

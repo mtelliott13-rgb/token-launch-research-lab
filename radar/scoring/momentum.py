@@ -10,7 +10,8 @@ For a token at least an hour old, the hourly average is the hourly total / 12,
 so volume acceleration is (vol_m5 * 12) / vol_h1. A younger token has only
 existed for part of the hour, so we divide by the number of 5-minute windows it
 has actually lived through; otherwise every new token would look like it was
-accelerating.
+accelerating. Age counts from graduation when we saw the token graduate, because
+its figures then come from a new pool whose history starts at that moment.
 
 The two ratios are unbounded, so each is squashed with x / (1 + x): a ratio of 1
 (steady) maps to 0.5. The score is the weighted average of the three, times 100,

@@ -54,8 +54,10 @@ def apply_snapshot(
 
     latest = {k: snap[k] for k in STATE_SNAP_FIELDS if k in snap and k not in history_only}
     row.update(latest)
-    created = row.get("created_at")
-    age_min = (now - created) / 60 if created is not None else None
+    # A graduated token trades in a new pool whose history starts at graduation, so its
+    # 5-minute and 1-hour figures are only as old as that pool.
+    started = max(row.get("created_at") or 0, row.get("migrated_at") or 0)
+    age_min = (now - started) / 60 if started else None
     scored = momentum(row, age_min, ctx.cfg["momentum"]) if is_eligible(row, age_min, ctx.cfg["rising"]) else _NO_SCORE
     row.update(scored, snapshot_ts=now, snapshot_source=source, snap_sig=sig, last_checked_at=now, miss_count=0)
     ctx.store.update_state(
