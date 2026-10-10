@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from radar import rising
-from radar.collectors import dexscreener, followup, geckoterminal, pumpportal
+from radar.collectors import dexscreener, followup, geckoterminal, metadata, pumpportal
 from radar.collectors.common import publish_tokens, supervise
 from radar.collectors.rugcheck import SafetyService, no_report_note
 from radar.config import ROOT, load_settings
@@ -49,6 +49,7 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
     health.register("rugcheck", label="RugCheck (safety)")
     health.register("followups", label="Follow-ups (outcomes)", expected_interval_s=60)
     health.register("retention", label="Retention (disk)")
+    health.register("metadata", label="Token metadata (descriptions)")
     ctx = Ctx(
         cfg=cfg,
         store=Store(
@@ -62,6 +63,8 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
         dex_promo=SourceClient("dexscreener_promo", src["dexscreener"]["profiles_per_min"], http, health),
         gecko=SourceClient("geckoterminal", src["geckoterminal"]["per_min"], http, health),
         rugcheck=SourceClient("rugcheck", src["rugcheck"]["per_min"], http, health),
+        # One retry only: these are other people's gateways, and a refusal should not stall the queue.
+        metadata=SourceClient("metadata", cfg["descriptions"]["per_min"], http, health, max_retries=1),
     )
     ctx.safety = SafetyService(ctx)
     return ctx
@@ -87,6 +90,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         backfill.run(ctx.store, cfg, time.time())
         backfill.upgrade(ctx.store, cfg, time.time())
         backfill.retag_themes(ctx.store)
+        backfill.queue_descriptions(ctx.store, cfg, time.time())
         collectors = {
             "pumpportal": pumpportal.run,
             "dexscreener:refresh": dexscreener.refresh_loop,
@@ -97,6 +101,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             "followups": followup.run,
             "retention": retention.run,
             "why:base_rates": why.base_rates_loop,
+            "metadata": metadata.run,
             "rising": rising.run,
         }
         tasks = [asyncio.create_task(supervise(name, ctx, fn), name=name) for name, fn in collectors.items()]

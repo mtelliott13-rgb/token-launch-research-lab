@@ -51,6 +51,7 @@ whose outcome is complete and shows the sample size on every row. Theme keywords
 | DexScreener | Price, liquidity, volume, buys and sells; profiles; paid boosts |
 | GeckoTerminal | New and trending pools; chart candles |
 | RugCheck | Safety reports |
+| Token metadata links (IPFS via ipfs.filebase.io / gateway.pinata.cloud) | Descriptions, only for tokens on Rising, graduated or above $10K |
 
 Things that differ from the original plan, found when the sources were checked on 2026-10-08:
 

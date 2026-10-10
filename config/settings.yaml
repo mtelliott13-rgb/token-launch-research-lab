@@ -127,6 +127,26 @@ retention:
   interval_s: 300
   batch: 500                    # tokens judged per pass
 
+# Token descriptions. A pump.fun token's description is in a small file its creator uploaded
+# (its "metadata link"). We fetch it once, only for tokens worth the request: on Rising,
+# graduated, or at min_mcap_usd or more. The token's theme tag is then worked out again.
+# These links are chosen by anonymous creators, so we only fetch from the places listed here:
+# files stored on IPFS are read through our own choice of gateway, and other links must be
+# https on one of allowed_hosts. Everything else is recorded as skipped.
+descriptions:
+  enabled: true
+  min_mcap_usd: 10000
+  per_min: 20                   # all hosts together
+  max_bytes: 65536
+  ipfs_gateways:                # tried in order; ipfs.io itself stopped serving direct requests (2026-10)
+    - https://ipfs.filebase.io/ipfs/
+    - https://gateway.pinata.cloud/ipfs/
+  allowed_hosts: [metadata.j7tracker.io, meta.uxento.io]
+  batch: 10
+  cycle_s: 15
+  max_tries: 3                  # for failures that might pass (timeouts, server errors)
+  retry_s: 900
+
 # How often each token's pair data is re-fetched from DexScreener (seconds).
 # A token that matches no rule stops being refreshed; the follow-up checks above still happen.
 refresh:

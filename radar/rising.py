@@ -5,6 +5,7 @@ import asyncio
 import time
 from typing import Any
 
+from radar.collectors.common import want_description
 from radar.context import Ctx
 from radar.lab import why
 from radar.view import view_row
@@ -51,6 +52,7 @@ async def run(ctx: Ctx) -> None:
             for row in rows:
                 # Being on the list keeps a token on the fast refresh schedule.
                 ctx.store.update_state(row["mint"], rising_seen_at=now)
+                want_description(ctx, row)
         for row in rows[: safety_cfg["rising_top_n"]]:
             if ctx.safety and now - (row["safety_ts"] or 0) > safety_cfg["recheck_s"]:
                 ctx.safety.request(row["mint"], priority=1)

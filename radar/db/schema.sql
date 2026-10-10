@@ -172,7 +172,13 @@ CREATE TABLE IF NOT EXISTS token_state (
     -- (token, outcome and follow-up rows always stay). NULL = not decided yet.
     retention                   TEXT,
     retention_at                REAL,
-    peak_mcap                   REAL       -- highest market cap in the token's snapshots when that was decided
+    peak_mcap                   REAL,      -- highest market cap in the token's snapshots when that was decided
+    -- Fetching the description from the metadata link: NULL = not asked for, 'wanted' = queued,
+    -- 'done' = saved, 'none' = the file has no description, 'skipped' = link is not somewhere
+    -- we fetch from, 'failed' = could not be fetched.
+    desc_state                  TEXT,
+    desc_tries                  INTEGER NOT NULL DEFAULT 0,
+    desc_retry_at               REAL
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);

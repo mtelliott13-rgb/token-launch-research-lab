@@ -157,3 +157,25 @@ def retag_themes(store: Store) -> int | None:
         store.set_meta(THEMES_KEY, tagger.version)
     log.info("themes: rules changed, %d tokens re-tagged", changed)
     return changed
+
+
+DESCRIPTIONS_KEY = "descriptions_queued_at"
+
+
+def queue_descriptions(store: Store, cfg: Mapping[str, Any], now: float) -> int | None:
+    """Once: queue a description fetch for tokens that already qualified before fetching existed
+    (appeared on Rising, graduated, or reached the market cap threshold at some point)."""
+    if store.meta(DESCRIPTIONS_KEY):
+        return None
+    with store.tx():
+        cur = store.db.execute(
+            "UPDATE token_state SET desc_state = 'wanted' WHERE desc_state IS NULL AND mint IN ("
+            "SELECT t.mint FROM tokens t JOIN token_state s ON s.mint = t.mint "
+            "WHERE t.metadata_uri IS NOT NULL AND t.description IS NULL AND (s.rising_seen_at IS NOT NULL "
+            "OR s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL OR s.mcap >= ?1 OR s.peak_mcap >= ?1 "
+            "OR EXISTS (SELECT 1 FROM snapshots x WHERE x.mint = t.mint AND x.mcap >= ?1)))",
+            (cfg["descriptions"]["min_mcap_usd"],),
+        )
+        store.set_meta(DESCRIPTIONS_KEY, str(now))
+    log.info("descriptions: %d existing tokens queued for a metadata fetch", cur.rowcount)
+    return cur.rowcount

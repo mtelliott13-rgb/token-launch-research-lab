@@ -75,8 +75,24 @@ class SourceClient:
     def _backoff(self, attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
         return min(cap, base * 2**attempt) + random.uniform(0, 0.5)
 
-    async def get_json(self, url: str, params: dict | None = None, *, ttl: float = 0) -> Any:
-        """GET a JSON document. `ttl` > 0 serves repeat calls from the cache for that many seconds."""
+    async def _get(self, url: str, params: dict | None, max_bytes: int | None) -> httpx.Response:
+        if max_bytes is None:
+            return await self._client.get(url, params=params)
+        # Untrusted host: read at most max_bytes, then stop.
+        async with self._client.stream("GET", url, params=params) as resp:
+            body = b""
+            async for chunk in resp.aiter_bytes():
+                body += chunk
+                if len(body) > max_bytes:
+                    raise SourceError(f"{self.name}: response from {url} is larger than {max_bytes} bytes", 413)
+            keep = {k: v for k, v in resp.headers.items() if k.lower() == "retry-after"}
+            return httpx.Response(resp.status_code, headers=keep, content=body)
+
+    async def get_json(self, url: str, params: dict | None = None, *, ttl: float = 0, max_bytes: int | None = None) -> Any:
+        """GET a JSON document. `ttl` > 0 serves repeat calls from the cache for that many seconds.
+
+        `max_bytes` caps how much of the response is read, for hosts we have no reason to trust.
+        """
         key = (url, tuple(sorted((params or {}).items())))
         if ttl > 0:
             hit = self._cache.get(key)
@@ -88,7 +104,7 @@ class SourceClient:
             await self._acquire()
             self.requests += 1
             try:
-                resp = await self._client.get(url, params=params)
+                resp = await self._get(url, params, max_bytes)
             except httpx.HTTPError as exc:
                 last = f"{type(exc).__name__}: {exc}"
                 self._block(self._backoff(attempt))
@@ -105,7 +121,8 @@ class SourceClient:
                 last = f"HTTP {resp.status_code}"
                 self._block(self._backoff(attempt))
                 continue
-            if resp.status_code >= 400:
+            if resp.status_code >= 400 or 300 <= resp.status_code < 400:
+                # Redirects are not followed (a link must not send us somewhere we did not choose).
                 # Our request was wrong for this resource (e.g. unknown pool); retrying won't help.
                 body = " ".join(resp.text[:200].split())
                 raise SourceError(f"{self.name}: HTTP {resp.status_code} for {url}", resp.status_code, body)

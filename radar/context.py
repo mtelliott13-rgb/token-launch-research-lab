@@ -23,6 +23,7 @@ class Ctx:
     dex_promo: SourceClient    # DexScreener profile/boost endpoints (lower limit)
     gecko: SourceClient
     rugcheck: SourceClient
+    metadata: SourceClient | None = None   # token metadata links (descriptions)
     safety: "SafetyService | None" = None
     sol_price_usd: float | None = None
     # Follow-up checkpoints recorded since the app started, by status.
@@ -33,5 +34,9 @@ class Ctx:
     why_settling: dict[str, float] = field(default_factory=dict)
     why_recorded: set[str] = field(default_factory=set)
     why_base: dict[str, Any] = field(default_factory=dict)
+    # Description fetches since the app started, by result.
+    description_counts: dict[str, int] = field(
+        default_factory=lambda: {"done": 0, "none": 0, "skipped": 0, "failed": 0, "retrying": 0}
+    )
     # Retention decisions made since the app started.
     retention_counts: dict[str, int] = field(default_factory=lambda: {"kept": 0, "early": 0, "pruned": 0, "snapshots_deleted": 0})

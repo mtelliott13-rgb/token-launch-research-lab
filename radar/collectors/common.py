@@ -11,7 +11,7 @@ from radar.context import Ctx
 from radar.faillog import FailureLog
 from radar.scoring.bot_volume import likely_bot_volume
 from radar.scoring.momentum import is_eligible, momentum
-from radar.view import view_row
+from radar.view import is_graduated, view_row
 
 log = logging.getLogger(__name__)
 failures = FailureLog(log)
@@ -63,6 +63,8 @@ def apply_snapshot(
     started = max(row.get("created_at") or 0, row.get("migrated_at") or 0)
     age_min = (now - started) / 60 if started else None
     scored = momentum(row, age_min, ctx.cfg["momentum"]) if is_eligible(row, age_min, ctx.cfg["rising"]) else _NO_SCORE
+    if is_graduated(row) or (row.get("mcap") or 0) >= ctx.cfg["descriptions"]["min_mcap_usd"]:
+        want_description(ctx, row)
     bot = likely_bot_volume(row, ctx.cfg["bot_volume"])
     bot = None if bot is None else int(bot)
     row.update(scored, bot_volume=bot, snapshot_ts=now, snapshot_source=source, snap_sig=sig, last_checked_at=now, miss_count=0)
@@ -77,6 +79,13 @@ def apply_snapshot(
         last_checked_at=now,
         miss_count=0,
     )
+
+
+def want_description(ctx: Ctx, row: dict[str, Any]) -> None:
+    """Queue a token's description to be fetched from its metadata link (once per token)."""
+    if row.get("desc_state") is None and row.get("metadata_uri") and not row.get("description"):
+        row["desc_state"] = "wanted"
+        ctx.store.update_state(row["mint"], desc_state="wanted")
 
 
 def publish_tokens(ctx: Ctx, mints: list[str], now: float) -> None:

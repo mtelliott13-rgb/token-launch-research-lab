@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 96 tests passing (`uv run pytest`), including Phase 2.
+- 105 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -142,8 +142,18 @@ sells and price change, so a pruned token still has its signal inputs at 1m, 5m,
   tried in that order and the first match wins. Code: `radar/scoring/themes.py`. All tokens are
   re-tagged on the next start after the file changes.
 - On the first 48,500 tokens: 79% other, 14% animal, 5% AI character, 2% celebrity, 1% political.
-- Only 400 of those tokens have a description (DexScreener profiles). pump.fun descriptions sit
-  behind each token's metadata link, which we do not fetch, so in practice the name decides.
+- Descriptions (added 2026-10-09): for tokens that appear on Rising, graduate or reach a $10,000
+  market cap, the description is fetched once from the token's metadata link and the token is
+  tagged again. Code: `radar/collectors/metadata.py`; settings under `descriptions:`.
+  - About 2,900 tokens a day qualify, so about 2,900 requests a day (2 a minute), capped at
+    20 a minute. The first start also works through about 3,000 tokens that already qualified.
+  - ipfs.io, where 86% of the links point, no longer serves direct requests (HTTP 429). Files on
+    IPFS are read through ipfs.filebase.io, then gateway.pinata.cloud; neither states a limit.
+  - Links are written by anonymous creators. We only fetch IPFS files (through our own choice
+    of gateway) and https links on two launch-tool hosts; about 3% of links are skipped. No
+    redirects are followed and at most 64 KB is read.
+  - In a 30-token trial, 16 had a description, 14 were empty and none changed theme. Expect
+    descriptions to move few tags.
 - http://localhost:8000/patterns compares themes, launch hour and launch day by graduation rate,
   peak and fate, with the token count on every row. It counts only pump.fun launches we saw being
   created whose outcome is complete. Until 5,000 are complete it shows a "not ready" note with

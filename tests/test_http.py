@@ -91,3 +91,17 @@ def test_persistent_server_errors_give_up_and_report_unhealthy():
     assert isinstance(result, SourceError)
     assert len(calls) == 3
     assert health.snapshot()["test"]["status"] == "down"
+
+
+def test_size_cap_stops_reading_an_oversized_response():
+    result, _, _, _, calls = run(lambda n: httpx.Response(200, content=b"x" * 5000), lambda src: src.get_json("https://x/a", max_bytes=1000))
+    assert isinstance(result, SourceError) and result.status == 413 and len(calls) == 1
+    ok, _, _, _, _ = run(lambda n: httpx.Response(200, json={"description": "hi"}), lambda src: src.get_json("https://x/a", max_bytes=1000))
+    assert ok == {"description": "hi"}
+
+
+def test_redirects_are_refused_not_followed():
+    result, _, _, _, calls = run(
+        lambda n: httpx.Response(302, headers={"location": "http://169.254.169.254/"}), lambda src: src.get_json("https://x/a")
+    )
+    assert isinstance(result, SourceError) and result.status == 302 and len(calls) == 1

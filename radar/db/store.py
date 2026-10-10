@@ -29,6 +29,9 @@ ADDED_COLUMNS = {
         "retention": "TEXT",
         "retention_at": "REAL",
         "peak_mcap": "REAL",
+        "desc_state": "TEXT",
+        "desc_tries": "INTEGER NOT NULL DEFAULT 0",
+        "desc_retry_at": "REAL",
     },
     "outcomes": {"peak": "TEXT", "fate": "TEXT"},
     "followups": {
@@ -44,6 +47,9 @@ ADDED_INDEXES = (
     # Tokens whose follow-ups are finished and whose snapshots await a keep-or-drop decision.
     "CREATE INDEX IF NOT EXISTS idx_state_retention ON token_state(mint) "
     "WHERE retention IS NULL AND followup_at IS NULL AND followup_idx IS NOT NULL",
+)
+ADDED_INDEXES += (
+    "CREATE INDEX IF NOT EXISTS idx_state_desc_wanted ON token_state(mint) WHERE desc_state = 'wanted'",
 )
 OUTCOME_FIELDS = (
     "p0_price", "p0_ts", "peak_multiple_24h", "time_to_peak_min", "multiple_1h", "multiple_24h",
@@ -299,6 +305,24 @@ class Store:
     def rising_entry(self, mint: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM rising_entries WHERE mint = ?", (mint,)).fetchone()
         return dict(row) if row else None
+
+    # ---- descriptions ---------------------------------------------------------
+
+    def description_candidates(self, now: float, limit: int) -> list[dict[str, Any]]:
+        """Tokens whose description is waiting to be fetched, newest first."""
+        cur = self.db.execute(
+            f"{ROW_SQL} WHERE s.desc_state = 'wanted' AND (s.desc_retry_at IS NULL OR s.desc_retry_at <= ?) "
+            "ORDER BY t.first_seen_at DESC LIMIT ?",
+            (now, limit),
+        )
+        return [dict(r) for r in cur]
+
+    def set_description(self, mint: str, description: str) -> str | None:
+        """Save a fetched description and tag the token again with it. Returns the new theme."""
+        name = self.db.execute("SELECT name FROM tokens WHERE mint = ?", (mint,)).fetchone()[0]
+        theme = self.tagger.tag(name, description) if self.tagger else None
+        self.db.execute("UPDATE tokens SET description = ?, theme = COALESCE(?, theme) WHERE mint = ?", (description, theme, mint))
+        return theme
 
     # ---- retention ----------------------------------------------------------
 

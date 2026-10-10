@@ -35,7 +35,7 @@ def run(handler, coro_fn):
             fast = lambda name: SourceClient(name, 60_000, http, health, max_retries=0)  # noqa: E731
             ctx = Ctx(cfg=load_settings(), store=Store(":memory:"), health=health, bus=EventBus(),
                       dex=fast("dexscreener"), dex_promo=fast("dexscreener_promo"),
-                      gecko=fast("geckoterminal"), rugcheck=fast("rugcheck"))
+                      gecko=fast("geckoterminal"), rugcheck=fast("rugcheck"), metadata=fast("metadata"))
             ctx.safety = SafetyService(ctx)
             queue = ctx.bus.subscribe()
             result = await coro_fn(ctx)
