@@ -58,8 +58,32 @@ def is_graduated(row: Mapping[str, Any]) -> bool:
     return bool(row.get("migrated_at")) or row.get("liquidity_usd") is not None
 
 
+def authorities(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Mint and freeze authority as the dashboard should show them.
+
+    The chain's own reading wins whenever we have one. `chain_disagrees` is set when it
+    differs from what RugCheck's report said; `authority_conflict` (shown as "Unverified")
+    only matters while all we have is a RugCheck report that contradicts itself.
+    """
+    rugcheck = (row.get("mint_authority_enabled"), row.get("freeze_authority_enabled"))
+    chain = (row.get("chain_mint_authority"), row.get("chain_freeze_authority"))
+    if None in chain:
+        return {
+            "mint_authority_enabled": rugcheck[0], "freeze_authority_enabled": rugcheck[1],
+            "authority_conflict": row.get("authority_conflict"), "chain_disagrees": False,
+            "authority_source": "rugcheck" if row.get("safety_ts") is not None else None,
+        }
+    reported = row.get("safety_ts") is not None
+    return {
+        "mint_authority_enabled": chain[0], "freeze_authority_enabled": chain[1], "authority_conflict": 0,
+        "chain_disagrees": reported and (bool(rugcheck[0]), bool(rugcheck[1])) != (bool(chain[0]), bool(chain[1])),
+        "authority_source": "chain",
+    }
+
+
 def view_row(row: Mapping[str, Any], now: float) -> dict[str, Any]:
     out = {k: row.get(k) for k in _VIEW_FIELDS}
+    out.update(authorities(row), chain_checked_at=row.get("chain_checked_at"))
     out["graduated"] = is_graduated(row)
     # We asked RugCheck and it has nothing, which is different from never having asked.
     out["no_rugcheck_report"] = row.get("safety_ts") is None and bool(row.get("safety_miss_count"))

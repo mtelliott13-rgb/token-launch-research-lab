@@ -147,6 +147,18 @@ descriptions:
   max_tries: 3                  # for failures that might pass (timeouts, server errors)
   retry_s: 900
 
+# On-chain check. For every token on Rising we read its mint and freeze authority straight
+# from the chain, and that reading replaces RugCheck's wherever the two differ.
+# One batched call covers up to 100 tokens. The public endpoint is free and needs no key;
+# its published limit is 40 requests per 10 seconds for one method, far above what this uses.
+onchain:
+  enabled: true
+  url: https://api.mainnet-beta.solana.com
+  per_min: 6                    # our own ceiling
+  cycle_s: 60                   # at most one call a minute
+  recheck_s: 1800               # each token is checked at most this often
+  batch: 100
+
 # How often each token's pair data is re-fetched from DexScreener (seconds).
 # A token that matches no rule stops being refreshed; the follow-up checks above still happen.
 refresh:

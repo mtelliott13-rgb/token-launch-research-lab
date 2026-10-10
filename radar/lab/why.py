@@ -33,7 +33,7 @@ from typing import Any, Mapping, Sequence
 
 from radar.context import Ctx
 from radar.scoring.momentum import momentum
-from radar.view import PAID_BOOST_WINDOW_S, is_graduated
+from radar.view import PAID_BOOST_WINDOW_S, authorities, is_graduated
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ def measure(row: Mapping[str, Any], extra: Mapping[str, Any], now: float, cfg: M
         stage = "graduated"
 
     boost_seen = row.get("boost_seen_at")
+    auth = authorities(row)
     checks: dict[str, Any] = {"checked": safety is not None}
     if safety:
         holders_list = json.loads(safety.get("top_holders_json") or "[]")
@@ -123,10 +124,11 @@ def measure(row: Mapping[str, Any], extra: Mapping[str, Any], now: float, cfg: M
         "holders_first": first[1] if grown else None,
         "bot_volume": bool(row.get("bot_volume")),
         "top10_pct": row.get("top10_pct"),
-        "mint_authority": bool(row.get("mint_authority_enabled")),
-        "freeze_authority": bool(row.get("freeze_authority_enabled")),
+        "mint_authority": bool(auth["mint_authority_enabled"]),
+        "freeze_authority": bool(auth["freeze_authority_enabled"]),
         "rugged": bool(row.get("rugged")),
-        "authority_conflict": bool(row.get("authority_conflict")),
+        "authority_conflict": bool(auth["authority_conflict"]),
+        "chain_disagrees": auth["chain_disagrees"],
         "no_report": row.get("safety_ts") is None and bool(row.get("safety_miss_count")),
         **checks,
         "metrics": {
@@ -248,6 +250,13 @@ def find_warnings(m: Mapping[str, Any], cfg: Mapping[str, Any]) -> list[dict[str
     if m.get("authority_conflict"):
         add("authority_unverified", "RugCheck's report contradicts itself on whether mint or freeze authority is revoked, so treat it as not revoked",
             "authorities unverified")
+    if m.get("chain_disagrees"):
+        live = m["mint_authority"] or m["freeze_authority"]
+        state = lambda on: "enabled" if on else "revoked"  # noqa: E731
+        add("chain_disagrees",
+            f"On-chain, mint authority is {state(m['mint_authority'])} and freeze authority is {state(m['freeze_authority'])}. "
+            "RugCheck's report says otherwise; we go by the chain.",
+            "RugCheck's authority reading was wrong", "high" if live else "warn", own=live)
     if m["mint_authority"]:
         add("mint_authority", "Mint authority is enabled: more tokens can be created", "mint authority on")
     if m["freeze_authority"]:

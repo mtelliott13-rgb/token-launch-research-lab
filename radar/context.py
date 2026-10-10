@@ -24,6 +24,7 @@ class Ctx:
     gecko: SourceClient
     rugcheck: SourceClient
     metadata: SourceClient | None = None   # token metadata links (descriptions)
+    solana: SourceClient | None = None     # public Solana RPC (on-chain mint/freeze authority)
     safety: "SafetyService | None" = None
     sol_price_usd: float | None = None
     # Follow-up checkpoints recorded since the app started, by status.
@@ -38,5 +39,7 @@ class Ctx:
     description_counts: dict[str, int] = field(
         default_factory=lambda: {"done": 0, "none": 0, "skipped": 0, "failed": 0, "retrying": 0}
     )
+    # On-chain authority checks since the app started.
+    onchain_counts: dict[str, int] = field(default_factory=lambda: {"checked": 0, "unreadable": 0, "disagreed": 0})
     # Retention decisions made since the app started.
     retention_counts: dict[str, int] = field(default_factory=lambda: {"kept": 0, "early": 0, "pruned": 0, "snapshots_deleted": 0})

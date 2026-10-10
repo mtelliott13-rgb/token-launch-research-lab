@@ -75,7 +75,9 @@ class SourceClient:
     def _backoff(self, attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
         return min(cap, base * 2**attempt) + random.uniform(0, 0.5)
 
-    async def _get(self, url: str, params: dict | None, max_bytes: int | None) -> httpx.Response:
+    async def _get(self, url: str, params: dict | None, max_bytes: int | None, body: Any = None) -> httpx.Response:
+        if body is not None:
+            return await self._client.post(url, json=body)
         if max_bytes is None:
             return await self._client.get(url, params=params)
         # Untrusted host: read at most max_bytes, then stop.
@@ -88,7 +90,13 @@ class SourceClient:
             keep = {k: v for k, v in resp.headers.items() if k.lower() == "retry-after"}
             return httpx.Response(resp.status_code, headers=keep, content=body)
 
-    async def get_json(self, url: str, params: dict | None = None, *, ttl: float = 0, max_bytes: int | None = None) -> Any:
+    async def post_json(self, url: str, body: Any) -> Any:
+        """POST a JSON body and return the JSON answer, with the same spacing, backoff and retries as a GET."""
+        return await self.get_json(url, body=body)
+
+    async def get_json(
+        self, url: str, params: dict | None = None, *, ttl: float = 0, max_bytes: int | None = None, body: Any = None
+    ) -> Any:
         """GET a JSON document. `ttl` > 0 serves repeat calls from the cache for that many seconds.
 
         `max_bytes` caps how much of the response is read, for hosts we have no reason to trust.
@@ -104,7 +112,7 @@ class SourceClient:
             await self._acquire()
             self.requests += 1
             try:
-                resp = await self._get(url, params, max_bytes)
+                resp = await self._get(url, params, max_bytes, body)
             except httpx.HTTPError as exc:
                 last = f"{type(exc).__name__}: {exc}"
                 self._block(self._backoff(attempt))

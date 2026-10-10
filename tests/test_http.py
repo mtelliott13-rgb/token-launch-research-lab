@@ -105,3 +105,12 @@ def test_redirects_are_refused_not_followed():
         lambda n: httpx.Response(302, headers={"location": "http://169.254.169.254/"}), lambda src: src.get_json("https://x/a")
     )
     assert isinstance(result, SourceError) and result.status == 302 and len(calls) == 1
+
+
+def test_post_json_sends_the_body_and_is_retried_like_a_get():
+    def handler(n):
+        return httpx.Response(503) if n == 1 else httpx.Response(200, json={"result": "ok"})
+
+    result, _, clock, _, calls = run(handler, lambda src: src.post_json("https://rpc/", {"method": "getMultipleAccounts"}))
+    assert result == {"result": "ok"} and len(calls) == 2 and clock.slept > 0
+    assert calls[0].method == "POST" and b"getMultipleAccounts" in calls[0].content

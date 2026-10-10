@@ -279,20 +279,22 @@ function flags(r) {
   if (r.trending_rank) out.push(badge("info", "Trending #" + r.trending_rank, "On GeckoTerminal's Solana trending list"));
   if (r.graduated) out.push(badge("info", "Graduated", "Off the bonding curve: it has a real liquidity pool"));
   if (r.bot_volume) out.push(badge("warn", "Likely bot volume", "Many trades in the last hour but the price barely moved, which usually means wallets trading back and forth to inflate the numbers. Only applied to tokens under $1M market cap. Thresholds are in config/settings.yaml."));
-  if (r.no_rugcheck_report) {
-    out.push(badge("idle", "No RugCheck report", "We asked RugCheck and it has no report for this token."));
-  } else if (r.safety_ts == null) {
-    out.push(badge("idle", "Unchecked", "No safety report yet. Open the token to fetch one."));
-  } else {
-    if (r.mint_authority_enabled) out.push(badge("crit", "Mint authority", "More tokens can still be minted"));
-    if (r.freeze_authority_enabled) out.push(badge("crit", "Freeze authority", "Holders' tokens can be frozen"));
-    // Two parts of the safety report disagree: say so rather than vouch for it.
+  if (r.no_rugcheck_report) out.push(badge("idle", "No RugCheck report", "We asked RugCheck and it has no report for this token."));
+  else if (r.safety_ts == null) out.push(badge("idle", "Unchecked", "No safety report yet. Open the token to fetch one."));
+  // Authorities come from the chain itself when we have read it, otherwise from RugCheck's report.
+  const onChain = r.authority_source === "chain";
+  if (r.safety_ts != null || onChain) {
+    const how = onChain ? " (read from the chain)" : "";
+    if (r.mint_authority_enabled) out.push(badge("crit", "Mint authority", "More tokens can still be minted" + how));
+    if (r.freeze_authority_enabled) out.push(badge("crit", "Freeze authority", "Holders' tokens can be frozen" + how));
+    // Two parts of the safety report disagree and we have not read the chain: say so rather than vouch for it.
     if (r.authority_conflict) out.push(badge("warn", "Unverified", "RugCheck's report contradicts itself on whether mint or freeze authority is revoked. Treat it as not revoked."));
-    else if (!r.mint_authority_enabled && !r.freeze_authority_enabled) out.push(badge("ok", "Authorities revoked", "Mint and freeze authority are both disabled"));
-    if (r.top10_pct != null) {
-      const kind = r.top10_pct > 50 ? "crit" : r.top10_pct > 30 ? "warn" : "ok";
-      out.push(badge(kind, `Top 10: ${r.top10_pct.toFixed(0)}%`, "Share of supply held by the 10 largest holders, excluding liquidity pools"));
-    }
+    else if (!r.mint_authority_enabled && !r.freeze_authority_enabled) out.push(badge("ok", "Authorities revoked", "Mint and freeze authority are both disabled" + (onChain ? ", confirmed on-chain" : ", according to RugCheck")));
+    if (r.chain_disagrees) out.push(badge("warn", "RugCheck was wrong", "RugCheck's report gave a different mint or freeze authority than the chain. The badges here follow the chain."));
+  }
+  if (r.safety_ts != null && r.top10_pct != null) {
+    const kind = r.top10_pct > 50 ? "crit" : r.top10_pct > 30 ? "warn" : "ok";
+    out.push(badge(kind, `Top 10: ${r.top10_pct.toFixed(0)}%`, "Share of supply held by the 10 largest holders, excluding liquidity pools"));
   }
   return h("div", { class: "badges" }, out);
 }
@@ -490,6 +492,8 @@ function renderSafety(s, note) {
       kv("Holders", fmtInt(s.total_holders)),
       kv("Insider wallets detected", fmtInt(s.insiders_detected))),
     h("div", { class: "note" }, "Holder figures exclude liquidity pools and the bonding curve. Checked " + fmtAge(nowS() - s.ts) + " ago." + (note ? " " + note : "")),
+    s.authority_source === "chain" && h("div", { class: "note" }, "Mint and freeze authority were read from the chain " + fmtAge(nowS() - s.chain_checked_at) + " ago." +
+      (s.chain_disagrees ? " RugCheck's report says otherwise; the chain is what counts." : " RugCheck's report agrees.")),
     s.risks.length
       ? h("ul", { class: "risks" }, s.risks.map((r) => h("li", null,
           badge(level(r.level), r.level || "note"), h("span", null, r.name + (r.value ? ` (${r.value})` : "")),

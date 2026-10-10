@@ -180,7 +180,12 @@ CREATE TABLE IF NOT EXISTS token_state (
     desc_state                  TEXT,
     desc_tries                  INTEGER NOT NULL DEFAULT 0,
     desc_retry_at               REAL,
-    authority_conflict          INTEGER    -- from the latest safety report; shown as "Unverified"
+    authority_conflict          INTEGER,   -- from the latest safety report; shown as "Unverified"
+    -- Mint and freeze authority as read from the chain itself (public Solana RPC). When present
+    -- these win over RugCheck's reading above. NULL values with a time = the account could not be read.
+    chain_checked_at            REAL,
+    chain_mint_authority        INTEGER,
+    chain_freeze_authority      INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);

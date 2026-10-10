@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from radar import rising
-from radar.collectors import dexscreener, followup, geckoterminal, metadata, pumpportal
+from radar.collectors import dexscreener, followup, geckoterminal, metadata, pumpportal, solana_rpc
 from radar.collectors.common import publish_tokens, supervise
 from radar.collectors.rugcheck import SafetyService, no_report_note
 from radar.config import ROOT, load_settings
@@ -27,7 +27,7 @@ from radar.http import SourceClient, SourceError
 from radar.lab import backfill, retention, stats, why
 from radar.lab.followups import step_in_delay
 from radar.scoring.themes import Tagger
-from radar.view import is_mint, view_row
+from radar.view import authorities, is_mint, view_row
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
     health.register("followups", label="Follow-ups (outcomes)", expected_interval_s=60)
     health.register("retention", label="Retention (disk)")
     health.register("metadata", label="Token metadata (descriptions)")
+    health.register("solana_rpc", label="Solana RPC (on-chain authority)")
     ctx = Ctx(
         cfg=cfg,
         store=Store(
@@ -65,15 +66,20 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
         rugcheck=SourceClient("rugcheck", src["rugcheck"]["per_min"], http, health),
         # One retry only: these are other people's gateways, and a refusal should not stall the queue.
         metadata=SourceClient("metadata", cfg["descriptions"]["per_min"], http, health, max_retries=1),
+        solana=SourceClient("solana_rpc", cfg["onchain"]["per_min"], http, health, max_retries=1),
     )
     ctx.safety = SafetyService(ctx)
     return ctx
 
 
-def safety_view(report: dict[str, Any] | None) -> dict[str, Any] | None:
+def safety_view(report: dict[str, Any] | None, row: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """A safety report for the drawer. With the token's `row`, the authority fields are the
+    ones the dashboard goes by (the chain's reading when we have one), not just RugCheck's."""
     if report is None:
         return None
     out = {k: v for k, v in report.items() if not k.endswith("_json")}
+    if row is not None:
+        out.update(authorities(row), chain_checked_at=row.get("chain_checked_at"))
     out["risks"] = json.loads(report.get("risks_json") or "[]")
     out["top_holders"] = json.loads(report.get("top_holders_json") or "[]")
     return out
@@ -103,6 +109,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             "retention": retention.run,
             "why:base_rates": why.base_rates_loop,
             "metadata": metadata.run,
+            "solana_rpc": solana_rpc.run,
             "rising": rising.run,
         }
         tasks = [asyncio.create_task(supervise(name, ctx, fn), name=name) for name, fn in collectors.items()]
@@ -223,7 +230,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         row = token_row(ctx, mint)
         return {
             "token": view_row(row, time.time()),
-            "safety": safety_view(ctx.store.latest_safety(mint)),
+            "safety": safety_view(ctx.store.latest_safety(mint), ctx.store.row(mint)),
             "bonding_curve": row["bonding_curve"],
             "metadata_uri": row["metadata_uri"],
         }
@@ -236,14 +243,14 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         try:
             report = await asyncio.wait_for(ctx.safety.get(mint), timeout=25)
         except asyncio.TimeoutError:
-            return {"safety": safety_view(ctx.store.latest_safety(mint)), "note": "RugCheck is slow right now; showing what we have."}
+            return {"safety": safety_view(ctx.store.latest_safety(mint), ctx.store.row(mint)), "note": "RugCheck is slow right now; showing what we have."}
         except SourceError as exc:
             note = no_report_note(*ctx.store.safety_misses(mint), time.time()) if exc.status else "RugCheck could not be reached."
-            return {"safety": safety_view(ctx.store.latest_safety(mint)), "note": note}
+            return {"safety": safety_view(ctx.store.latest_safety(mint), ctx.store.row(mint)), "note": note}
         except Exception:  # noqa: BLE001 - an unreadable report should not break the drawer
             log.exception("could not process the safety report for %s", mint)
-            return {"safety": safety_view(ctx.store.latest_safety(mint)), "note": "RugCheck returned a report we could not read."}
-        return {"safety": safety_view(report), "note": None}
+            return {"safety": safety_view(ctx.store.latest_safety(mint), ctx.store.row(mint)), "note": "RugCheck returned a report we could not read."}
+        return {"safety": safety_view(report, ctx.store.row(mint)), "note": None}
 
     @app.get("/api/token/{mint}/why")
     async def token_why(request: Request, mint: str) -> dict[str, Any]:

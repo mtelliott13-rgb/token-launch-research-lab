@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 109 tests passing (`uv run pytest`), including Phase 2.
+- 115 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -197,9 +197,24 @@ sells and price change, so a pruned token still has its signal inputs at 1m, 5m,
 - From now on, if a report's fields and its risk list disagree in either direction, the token
   shows "Unverified" instead of "Authorities revoked", the "hide if authority enabled" filter
   hides it, and "Why it's rising" lists it as a warning.
-- Not covered: in a sample of 300 tokens where both parts of the report said revoked, 1 had a
-  live authority on-chain. The dashboard cannot see that without asking the chain itself; a
-  routine on-chain check for Rising tokens would be a new data source and is not built.
+- In a sample of 300 tokens where both parts of the report said revoked, 1 had a live authority
+  on-chain. That gap is what the routine on-chain check below closes for Rising tokens.
+
+## Routine on-chain authority check (added 2026-10-09)
+
+- Every token on Rising has its mint and freeze authority read from the chain, through the free
+  public Solana RPC (`getMultipleAccounts`, up to 100 tokens per call, no key). Each token is
+  checked at most every 30 minutes; the time of the last check is saved, so this holds across
+  restarts. Code: `radar/collectors/solana_rpc.py`; settings under `onchain:`.
+- The chain wins. Where its reading differs from RugCheck's, the badges, the "hide if authority
+  enabled" filter and "Why it's rising" all follow the chain, the token gets a "RugCheck was
+  wrong" badge and a warning, and a line is written to the log. RugCheck's own reading stays in
+  the database unchanged. A token the chain has confirmed never shows "Unverified".
+- Cost: at most one call a minute, so at most 1,440 a day, and close to that in practice because
+  a new token reaches Rising most minutes. The published limit is 40 calls per 10 seconds.
+- Only Rising tokens are checked. A token that never reaches Rising still shows RugCheck's
+  reading. Once checked, a token keeps its chain reading after it leaves Rising; "revoked" can
+  never be undone on-chain, while "enabled" may by then be out of date.
 
 ## Open decisions
 

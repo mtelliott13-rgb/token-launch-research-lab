@@ -33,6 +33,9 @@ ADDED_COLUMNS = {
         "desc_tries": "INTEGER NOT NULL DEFAULT 0",
         "desc_retry_at": "REAL",
         "authority_conflict": "INTEGER",
+        "chain_checked_at": "REAL",
+        "chain_mint_authority": "INTEGER",
+        "chain_freeze_authority": "INTEGER",
     },
     "outcomes": {"peak": "TEXT", "fate": "TEXT"},
     "safety": {"authority_conflict": "INTEGER"},
@@ -398,8 +401,10 @@ class Store:
             args.append(max_top10_pct)
         if hide_authority:
             where.append(
-                "COALESCE(s.mint_authority_enabled, 0) = 0 AND COALESCE(s.freeze_authority_enabled, 0) = 0 "
-                "AND COALESCE(s.authority_conflict, 0) = 0"
+                # The chain's reading wins over RugCheck's (see radar.view.authorities).
+                "COALESCE(s.chain_mint_authority, s.mint_authority_enabled, 0) = 0 "
+                "AND COALESCE(s.chain_freeze_authority, s.freeze_authority_enabled, 0) = 0 "
+                "AND (s.chain_mint_authority IS NOT NULL OR COALESCE(s.authority_conflict, 0) = 0)"
             )
         if graduated_only:
             where.append(GRADUATED_SQL)
