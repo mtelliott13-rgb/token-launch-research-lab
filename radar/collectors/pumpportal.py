@@ -26,6 +26,7 @@ import websockets
 from radar.collectors.common import publish_tokens, to_float
 from radar.context import Ctx
 from radar.faillog import FailureLog
+from radar.lab.outages import OutageTracker
 from radar.view import clean_text, clean_url, is_mint
 
 log = logging.getLogger(__name__)
@@ -111,7 +112,9 @@ async def run(ctx: Ctx) -> None:
     counts = {"create": 0, "migrate": 0}
     reconnects = 0
     backoff = cfg["reconnect_min_s"]
-    while True:
+    # The gap since the last launch we stored, before this start, is itself an outage.
+    outages = OutageTracker(ctx, NAME, ctx.store.last_event_at(NAME), "the app was not running", cfg["outage_min_gap_s"])
+    while True:  # never gives up: the wait between attempts grows to reconnect_max_s and stays there
         try:
             async with websockets.connect(
                 cfg["url"],
@@ -129,10 +132,13 @@ async def run(ctx: Ctx) -> None:
                     # New tokens arrive every couple of seconds; long silence means a dead link.
                     raw = await asyncio.wait_for(ws.recv(), timeout=cfg["stale_after_s"])
                     backoff = cfg["reconnect_min_s"]
+                    seen = counts["create"] + counts["migrate"]
                     try:
                         handle_message(ctx, raw, counts)
                     except Exception:  # noqa: BLE001 - one bad message must not drop the stream
                         log.exception("pumpportal: failed to handle a message")
+                    if counts["create"] + counts["migrate"] > seen:
+                        outages.event(time.time())  # launches are flowing (again)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - any failure here means "reconnect"
@@ -140,6 +146,7 @@ async def run(ctx: Ctx) -> None:
             failures.failed(NAME, f"pumpportal disconnected ({reason}); reconnecting with backoff")
             ctx.health.error(NAME, reason)
             ctx.health.note(NAME, connected=False)
+            outages.disconnected(reason)
         reconnects += 1
         await asyncio.sleep(backoff + random.uniform(0, 1))
         backoff = min(backoff * 2, cfg["reconnect_max_s"])

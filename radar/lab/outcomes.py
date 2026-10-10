@@ -67,11 +67,16 @@ def compute_outcome(
     rugcheck_rugged: bool,
     cfg: Mapping[str, Any],
     now: float,
+    launch_unseen: bool = False,
 ) -> dict[str, Any]:
     """Outcome fields for one token.
 
     `points` are (time, price, pool liquidity or None), oldest first. `checks` maps a
     follow-up checkpoint name to its row (status, price_usd, vol_h24).
+
+    `launch_unseen`: we did not see this token being created (it launched during an outage),
+    so p0 is not its early price and its first minutes are missing. "launch" is then listed
+    as missing and the outcome can never be complete.
     """
     final = FINAL_CHECKPOINT in checks
     out: dict[str, Any] = {"final": int(final), "complete": 0, "computed_at": now, "peak": None, "fate": None}
@@ -85,11 +90,11 @@ def compute_outcome(
 
     points = [p for p in points if p[1] and p[1] > 0]
     if not points:  # never priced: there is no peak to speak of, but it can still have a fate
-        out.update(fate=_fate(rugcheck_rugged, dead), missing="p0")
+        out.update(fate=_fate(rugcheck_rugged, dead), missing="launch,p0" if launch_unseen else "p0")
         return out
 
     p0_ts, p0 = points[0][0], points[0][1]
-    missing = []
+    missing = ["launch"] if launch_unseen else []
 
     peak_ts, peak, high, drawdown, drawdown_at_peak = p0_ts, p0, p0, 0.0, 0.0
     for ts, price, _ in points:

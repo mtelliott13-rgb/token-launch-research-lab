@@ -41,5 +41,7 @@ class Ctx:
     )
     # On-chain authority checks since the app started.
     onchain_counts: dict[str, int] = field(default_factory=lambda: {"checked": 0, "unreadable": 0, "disagreed": 0})
+    # PumpPortal outages as (start, end): launches in these windows were not seen.
+    outages: list[tuple[float, float]] = field(default_factory=list)
     # Retention decisions made since the app started.
     retention_counts: dict[str, int] = field(default_factory=lambda: {"kept": 0, "early": 0, "pruned": 0, "snapshots_deleted": 0})

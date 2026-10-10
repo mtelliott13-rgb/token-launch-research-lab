@@ -17,9 +17,8 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`).
 
-**A restart is pending.** The collector was last started on 2026-10-09 at 22:21. The routine
-on-chain authority check was committed at 22:25, so it is not running yet. Everything else
-below is live.
+**A restart is pending** for the outage tracking built on 2026-10-10. Everything else below
+has been live since the restart on 2026-10-09 at 22:38.
 
 ## What exists
 
@@ -35,9 +34,10 @@ below is live.
 | "Why it's rising" | 2026-10-09 | `radar/lab/why.py` |
 | Description fetch | 2026-10-09 | `radar/collectors/metadata.py` |
 | Mint and freeze authority fix | 2026-10-09 | `radar/collectors/rugcheck.py` |
-| Routine on-chain authority check (needs the restart) | 2026-10-09 | `radar/collectors/solana_rpc.py` |
+| Routine on-chain authority check | 2026-10-09 | `radar/collectors/solana_rpc.py` |
+| PumpPortal outage tracking (needs the restart) | 2026-10-10 | `radar/lab/outages.py` |
 
-115 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
+123 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
 trades, signs or holds keys.
 
 ## When each page will have enough data
@@ -176,11 +176,31 @@ Oct 9.
   assets and tokenized stocks. The saved reports were corrected.
 - **"Unverified".** If a report's fields and its risk list disagree, the token shows
   "Unverified" instead of "Authorities revoked", and the authority filter hides it.
-- **Routine on-chain check (starts at the next restart).** Every token on Rising has its mint
+- **Routine on-chain check.** Every token on Rising has its mint
   and freeze authority read from the chain through the free public Solana RPC, batched, at most
   every 30 minutes per token. The chain wins: where it differs from RugCheck, the badges, the
   filter and "Why it's rising" follow the chain, and the token gets a "RugCheck was wrong"
   badge, a warning and a log line. At most 1,440 calls a day (one a minute).
+
+## PumpPortal outages (2026-10-10)
+
+- The wait between reconnect attempts now tops out at 30 seconds (was 60) and the loop never
+  gives up.
+- **What counts as an outage:** the time between two launches we received, if the connection
+  dropped in between, the app was restarted in between, or the silence lasted 60 seconds or more
+  (launches normally arrive every second or two). That one rule covers dropped connections,
+  stalled streams, the computer sleeping and the app being off. Code: `radar/lab/outages.py`.
+- Each outage is logged with its length when it ends, saved in the `outages` table, and listed
+  under "Missed periods" on the Data page with an estimate of the launches missed.
+- **Tokens launched during an outage are missing data.** If we later meet such a token another
+  way, its outcome lists "launch" as missing and is never complete, so it is left out of Patterns
+  and of the "Why it's rising" base rates. The same applies to a pump.fun token we only know
+  from its graduation. The flag is applied at each token's next follow-up check.
+- **History so far** (found from gaps in the recorded launches): 8 outages totalling 3h 15m, 8%
+  of the 40.5 hours collected, about 5,100 launches missed. Two were the app being stopped
+  (39 minutes on Oct 8, 64 minutes on Oct 9). The other six, mid-morning on Oct 9 and Oct 10,
+  happened while the app was running; no collector logged anything for up to 15 minutes at a
+  time, which is what a sleeping computer looks like. Not confirmed.
 
 ## Outside requests, per day
 
@@ -198,7 +218,7 @@ All free, no keys.
 
 ## Open decisions
 
-1. **Restart to switch on the on-chain check.** No other action needed.
+1. **Restart to switch on outage tracking.** No other action needed.
 
 2. **PumpPortal trade data (blocks Phase 2b, Lane A).** PumpPortal refuses per-token trade
    subscriptions without an API key funded with about 0.02 SOL, so there is no free
@@ -229,6 +249,10 @@ All free, no keys.
 
 8. **Delete the archived stray files?** `data/archive/` holds 12.6 MB of leftovers that are safe
    to delete.
+
+10. **Keep the computer awake?** Six of the eight outages so far look like the Mac sleeping in
+    the morning (see "PumpPortal outages"). If so, no reconnect setting helps; the fix is in the
+    Mac's sleep settings or in how the collector is started.
 
 9. **Extend the on-chain check?** It covers Rising only. Tokens that never reach Rising still
    show RugCheck's reading, which was wrong for about 1.5% of checked tokens.

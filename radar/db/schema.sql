@@ -262,6 +262,17 @@ CREATE TABLE IF NOT EXISTS rising_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_rising_entries_pattern ON rising_entries(pattern);
 
+-- Periods when a live stream delivered nothing, so whatever happened then is missing.
+-- For pumpportal: tokens launched between started_at and ended_at were not seen being created.
+CREATE TABLE IF NOT EXISTS outages (
+    id              INTEGER PRIMARY KEY,
+    source          TEXT NOT NULL,
+    started_at      REAL NOT NULL,     -- the last event received before the silence
+    ended_at        REAL NOT NULL,     -- the first event received after it
+    reason          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outages_source ON outages(source, started_at);
+
 CREATE TABLE IF NOT EXISTS meta (
     key             TEXT PRIMARY KEY,
     value           TEXT

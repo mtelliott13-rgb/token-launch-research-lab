@@ -15,8 +15,11 @@ sources:
   pumpportal:
     url: wss://pumpportal.fun/api/data
     reconnect_min_s: 1
-    reconnect_max_s: 60
+    reconnect_max_s: 30         # longest wait between reconnect attempts; it never stops trying
     stale_after_s: 120          # reconnect if nothing arrives for this long
+    # A period with no launches arriving is saved as an outage when the connection dropped, or
+    # when the silence lasted at least this long (launches normally arrive every second or two).
+    outage_min_gap_s: 60
   dexscreener:
     base_url: https://api.dexscreener.com
     pairs_per_min: 120          # documented limit ~300/min on token/pair endpoints

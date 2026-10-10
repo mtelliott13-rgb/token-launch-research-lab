@@ -24,7 +24,7 @@ from radar.db.store import Store
 from radar.events import EventBus
 from radar.health import Health
 from radar.http import SourceClient, SourceError
-from radar.lab import backfill, retention, stats, why
+from radar.lab import backfill, outages, retention, stats, why
 from radar.lab.followups import step_in_delay
 from radar.scoring.themes import Tagger
 from radar.view import authorities, is_mint, view_row
@@ -98,6 +98,8 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         backfill.retag_themes(ctx.store)
         backfill.queue_descriptions(ctx.store, cfg, time.time())
         backfill.fix_authority_flags(ctx.store, time.time())
+        outages.backfill(ctx.store, cfg, time.time())
+        ctx.outages = ctx.store.outages("pumpportal")
         collectors = {
             "pumpportal": pumpportal.run,
             "dexscreener:refresh": dexscreener.refresh_loop,

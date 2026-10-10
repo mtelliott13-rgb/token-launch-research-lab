@@ -177,7 +177,7 @@ function render(d) {
   $("theme-head").replaceChildren(head("Theme"));
   $("theme-body").replaceChildren(...d.themes.map((g) => row(THEME_NAMES[g.theme] || g.theme, g, minN)), total);
   $("theme-sub").textContent = `${fmtInt(d.complete)} pump.fun launches with a complete outcome`;
-  $("theme-note").textContent = `Only pump.fun launches we saw being created are counted, and only those whose outcome is complete (every figure present, 7 days after launch). ${fmtInt(d.final)} launches are past day 7; those missing a figure, for example because we never saw a price or the collector was off at a checkpoint, are left out. Each percentage is a share of the row's tokens; hover for the count. Rows with fewer than ${fmtInt(minN)} tokens are greyed out. Runner is a peak of ${L.runner_multiple}× to ${L.moonshot_multiple}× in the first 24 hours, moonshot is ${L.moonshot_multiple}× or more.`;
+  $("theme-note").textContent = `Only pump.fun launches we saw being created are counted, and only those whose outcome is complete (every figure present, 7 days after launch). ${fmtInt(d.final)} launches are past day 7; those missing a figure are left out, for example because we never saw a price, the collector was off at a checkpoint, or the token launched during a missed period (see the Data page). Each percentage is a share of the row's tokens; hover for the count. Rows with fewer than ${fmtInt(minN)} tokens are greyed out. Runner is a peak of ${L.runner_multiple}× to ${L.moonshot_multiple}× in the first 24 hours, moonshot is ${L.moonshot_multiple}× or more.`;
 
   // Launch times arrive per hour of the week in UTC; fold them into this browser's time zone.
   const offset = Math.round(-new Date().getTimezoneOffset() / 60);

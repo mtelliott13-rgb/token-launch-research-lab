@@ -125,6 +125,15 @@
   </section>
 
   <section>
+    <div class="head"><h2>Missed periods</h2><span class="sub" id="outage-sub"></span></div>
+    <div class="wrap" style="max-height:340px;overflow:auto"><table>
+      <thead><tr><th>From</th><th>To</th><th class="num">Length</th><th class="num" title="Length times the average launch rate. An estimate, not a count.">Launches missed (estimate)</th><th>Why</th></tr></thead>
+      <tbody id="outages"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="outage-note"></div></div>
+  </section>
+
+  <section>
     <div class="head"><h2>Data retention</h2><span class="sub" id="retention-sub"></span></div>
     <div class="wrap"><table>
       <thead><tr><th>Snapshots</th><th></th><th class="num">Tokens</th><th class="num">Share</th></tr></thead>
@@ -229,6 +238,17 @@ function render(d) {
   }));
   const s = d.since_start;
   $("followups-note").textContent = `Since the app last started: ${fmtInt(s.done)} done, ${fmtInt(s.no_data)} no data, ${fmtInt(s.skipped)} skipped. Coverage is the share of checkpoints we have an answer for. Skipped means the collector was off or behind when the check was due, so that figure is unknown.`;
+
+  const og = d.outages || { count: 0, total_s: 0, recent: [], launches_unseen: 0, pump_launches: 0 };
+  const when = (ts) => new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const collected = Math.max(1, (d.last_seen_at || d.now) - (d.first_seen_at || d.now));
+  const perSecond = og.pump_launches / Math.max(1, collected - og.total_s);   // launch rate while we were listening
+  $("outages").replaceChildren(...(og.recent.length ? og.recent.map((o) => h("tr", null,
+    h("td", null, when(o.started_at)), h("td", null, when(o.ended_at)), num(fmtAge(o.ended_at - o.started_at)),
+    num("about " + fmtInt((o.ended_at - o.started_at) * perSecond)), h("td", { class: "muted" }, o.reason || "")))
+    : [h("tr", null, h("td", { colspan: "5", class: "muted" }, "None recorded."))]));
+  $("outage-sub").textContent = `${fmtInt(og.count)} periods, ${fmtAge(og.total_s)} in total, ${fmtShare(og.total_s, collected)} of the time since collection began`;
+  $("outage-note").textContent = `A missed period is any stretch with no new launches arriving from PumpPortal: the connection dropped, the stream stalled, the computer slept, or the app was not running. Tokens launched in one were not seen being created. ${fmtInt(og.launches_unseen)} tokens we later met another way are marked as missing their launch, so their outcomes are never complete and they are left out of Patterns and base rates.` + (og.recent.length < og.count ? ` Showing the latest ${og.recent.length}.` : "");
 
   const R = d.retention || {}, P = d.retention_policy, rs = d.retention_since_start;
   $("retention").replaceChildren(

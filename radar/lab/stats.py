@@ -44,6 +44,18 @@ def collect(db: sqlite3.Connection, cfg: Mapping[str, Any]) -> dict[str, Any]:
         },
         "followups": [{"checkpoint": name, **statuses} for name, statuses in by_checkpoint.items()],
         "followups_pending": one("SELECT COUNT(*) FROM token_state WHERE followup_at IS NOT NULL")[0],
+        "outages": {
+            "count": one("SELECT COUNT(*) FROM outages WHERE source = 'pumpportal'")[0],
+            "total_s": one("SELECT COALESCE(SUM(ended_at - started_at), 0) FROM outages WHERE source = 'pumpportal'")[0],
+            "recent": [
+                {"started_at": start, "ended_at": end, "reason": reason}
+                for start, end, reason in db.execute(
+                    "SELECT started_at, ended_at, reason FROM outages WHERE source = 'pumpportal' ORDER BY started_at DESC LIMIT 100"
+                )
+            ],
+            "launches_unseen": one("SELECT COUNT(*) FROM outcomes WHERE missing LIKE 'launch%'")[0],
+            "pump_launches": one("SELECT COUNT(*) FROM tokens WHERE source = 'pumpportal'")[0],
+        },
         "retention": {
             (verdict or "undecided"): count
             for verdict, count in db.execute("SELECT retention, COUNT(*) FROM token_state GROUP BY 1")

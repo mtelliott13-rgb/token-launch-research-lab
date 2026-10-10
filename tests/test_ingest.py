@@ -239,6 +239,9 @@ def test_pumpportal_reconnects_after_the_connection_drops():
     assert all(subs == ["subscribeNewToken", "subscribeMigration"] for subs in connections)
     health = ctx.health.snapshot()["pumpportal"]
     assert health["error_count"] >= 2 and health["detail"]["reconnects"] >= 2
+    # each drop between two launches is saved as an outage with the reason it began
+    saved = ctx.store.db.execute("SELECT started_at, ended_at, reason FROM outages WHERE source = 'pumpportal'").fetchall()
+    assert len(saved) == 2 == len(ctx.outages) and all(end > start and "ConnectionClosed" in reason for start, end, reason in saved)
 
 
 def test_rugcheck_no_report_is_remembered_and_retried_with_backoff(monkeypatch):

@@ -311,6 +311,23 @@ class Store:
         row = self.db.execute("SELECT * FROM rising_entries WHERE mint = ?", (mint,)).fetchone()
         return dict(row) if row else None
 
+    # ---- outages ---------------------------------------------------------------
+
+    def add_outage(self, source: str, started_at: float, ended_at: float, reason: str | None) -> None:
+        self.db.execute(
+            "INSERT INTO outages (source, started_at, ended_at, reason) VALUES (?, ?, ?, ?)",
+            (source, started_at, ended_at, reason),
+        )
+
+    def outages(self, source: str) -> list[tuple[float, float]]:
+        cur = self.db.execute("SELECT started_at, ended_at FROM outages WHERE source = ? ORDER BY started_at", (source,))
+        return [tuple(r) for r in cur]
+
+    def last_event_at(self, source: str) -> float | None:
+        """When the last raw event from this source was stored."""
+        row = self.db.execute("SELECT ts FROM raw_events WHERE source = ? ORDER BY id DESC LIMIT 1", (source,)).fetchone()
+        return row[0] if row else None
+
     # ---- descriptions ---------------------------------------------------------
 
     def description_candidates(self, now: float, limit: int) -> list[dict[str, Any]]:

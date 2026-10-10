@@ -68,8 +68,8 @@ def test_live_refresh_fills_a_checkpoint_for_free(at):
 
 def test_missed_windows_are_recorded_as_skipped_and_unlisted_tokens_as_no_data(at):
     async def flow(ctx):
-        ctx.store.upsert_token(FRANK, source="pumpportal", first_seen_at=T0)
-        ctx.store.upsert_token(FIX, source="pumpportal", first_seen_at=T0 + 3700 - 95)
+        ctx.store.upsert_token(FRANK, source="pumpportal", first_seen_at=T0, initial_mcap_sol=28.0)
+        ctx.store.upsert_token(FIX, source="pumpportal", first_seen_at=T0 + 3700 - 95, initial_mcap_sol=28.0)
         return await followup.run_once(ctx, at(3700))   # collector was off for FRANK's first hour
 
     made, ctx, _ = run(pairs(), flow)                    # DexScreener knows neither token

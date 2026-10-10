@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from radar.context import Ctx
 from radar.db.store import FOLLOWUP_FIELDS
+from radar.lab.outages import launch_unseen
 from radar.lab.outcomes import compute_outcome
 
 
@@ -88,6 +89,7 @@ def update_outcome(ctx: Ctx, row: Mapping[str, Any], now: float) -> None:
         rugcheck_rugged=bool(row.get("rugged")),
         cfg=ctx.cfg["outcomes"],
         now=now,
+        launch_unseen=launch_unseen(row, ctx.outages),
     )
     store.upsert_outcome(mint, outcome)
 
