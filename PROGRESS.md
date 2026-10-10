@@ -250,12 +250,12 @@ All free, no keys.
 8. **Delete the archived stray files?** `data/archive/` holds 12.6 MB of leftovers that are safe
    to delete.
 
+9. **Extend the on-chain check?** It covers Rising only. Tokens that never reach Rising still
+   show RugCheck's reading, which was wrong for about 1.5% of checked tokens.
+
 10. **Keep the computer awake?** Six of the eight outages so far look like the Mac sleeping in
     the morning (see "PumpPortal outages"). If so, no reconnect setting helps; the fix is in the
     Mac's sleep settings or in how the collector is started.
-
-9. **Extend the on-chain check?** It covers Rising only. Tokens that never reach Rising still
-   show RugCheck's reading, which was wrong for about 1.5% of checked tokens.
 
 Defaults chosen during the build, all changeable in `config/settings.yaml`: Rising cap of $50M;
 bot-volume flag at 300 trades and 1%; retention thresholds of $30,000 and $10,000; 5,000 complete
