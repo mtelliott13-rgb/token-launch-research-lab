@@ -32,8 +32,10 @@ ADDED_COLUMNS = {
         "desc_state": "TEXT",
         "desc_tries": "INTEGER NOT NULL DEFAULT 0",
         "desc_retry_at": "REAL",
+        "authority_conflict": "INTEGER",
     },
     "outcomes": {"peak": "TEXT", "fate": "TEXT"},
+    "safety": {"authority_conflict": "INTEGER"},
     "followups": {
         "vol_m5": "REAL", "vol_h1": "REAL", "buys_m5": "INTEGER", "sells_m5": "INTEGER",
         "buys_h1": "INTEGER", "sells_h1": "INTEGER", "price_chg_m5": "REAL", "price_chg_h1": "REAL",
@@ -396,7 +398,8 @@ class Store:
             args.append(max_top10_pct)
         if hide_authority:
             where.append(
-                "COALESCE(s.mint_authority_enabled, 0) = 0 AND COALESCE(s.freeze_authority_enabled, 0) = 0"
+                "COALESCE(s.mint_authority_enabled, 0) = 0 AND COALESCE(s.freeze_authority_enabled, 0) = 0 "
+                "AND COALESCE(s.authority_conflict, 0) = 0"
             )
         if graduated_only:
             where.append(GRADUATED_SQL)

@@ -91,6 +91,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         backfill.upgrade(ctx.store, cfg, time.time())
         backfill.retag_themes(ctx.store)
         backfill.queue_descriptions(ctx.store, cfg, time.time())
+        backfill.fix_authority_flags(ctx.store, time.time())
         collectors = {
             "pumpportal": pumpportal.run,
             "dexscreener:refresh": dexscreener.refresh_loop,

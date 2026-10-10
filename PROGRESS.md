@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 105 tests passing (`uv run pytest`), including Phase 2.
+- 109 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -181,9 +181,25 @@ sells and price change, so a pruned token still has its signal inputs at 1m, 5m,
 - "How unusual" compares with the up to 50 tokens on Rising at that moment, not with history.
 - Holder growth needs two safety reports, about 30 minutes apart, so it is usually blank when a
   token first appears. All 50 Rising tokens now get safety checks (was the top 25).
-- Noticed while testing, not fixed: for some tokens RugCheck's risk list says "Mint Authority
-  still enabled" while our own reading of the same report says revoked. Worth checking which
-  field is right before relying on the "Authorities revoked" badge.
+
+## Mint and freeze authority fix (2026-10-09)
+
+- Cause: RugCheck sometimes gives the top-level `mintAuthority` / `freezeAuthority` as an object
+  describing the authority's account instead of its address. We only recognised addresses, so a
+  live authority was read as revoked.
+- Checked against the chain with the public Solana RPC (`getMultipleAccounts`, 4 calls): for all
+  43 tokens where our panel and RugCheck's risk list disagreed, the chain agreed with the risk
+  list. 42 of them showed "Authorities revoked" wrongly and 1 was missing its freeze badge, out
+  of 2,864 tokens with a safety report. They are mostly bridged assets and tokenized stocks
+  (WBTC, WETH, cbBTC, NEAR, the xStocks), not pump.fun launches. 42 had been on Rising.
+- Fixed in `radar/collectors/rugcheck.py`. Saved reports are corrected once on start from their
+  stored risk lists (`backfill.fix_authority_flags`).
+- From now on, if a report's fields and its risk list disagree in either direction, the token
+  shows "Unverified" instead of "Authorities revoked", the "hide if authority enabled" filter
+  hides it, and "Why it's rising" lists it as a warning.
+- Not covered: in a sample of 300 tokens where both parts of the report said revoked, 1 had a
+  live authority on-chain. The dashboard cannot see that without asking the chain itself; a
+  routine on-chain check for Rising tokens would be a new data source and is not built.
 
 ## Open decisions
 

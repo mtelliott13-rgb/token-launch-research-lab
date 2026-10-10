@@ -83,3 +83,32 @@ def test_older_database_gets_new_columns_and_holder_counts(tmp_path):
     assert s.followups_for("M1")["1m"]["buys_m5"] == 7
     s.close()
     Store(path).close()  # starting again changes nothing
+
+
+def test_saved_reports_that_misread_a_live_authority_are_corrected_once():
+    import json
+
+    from radar.lab import backfill
+
+    s = Store(":memory:")
+    risks = lambda *names: json.dumps([{"name": n, "level": "danger"} for n in names])  # noqa: E731
+    for mint in ("WBTC", "BOTH", "FINE", "RIGHT"):
+        s.upsert_token(mint, source="gecko", first_seen_at=1.0)
+    s.add_safety("WBTC", 5.0, {"mint_authority_enabled": 0, "freeze_authority_enabled": 0, "risks_json": risks("Low Liquidity")})
+    s.add_safety("WBTC", 9.0, {"mint_authority_enabled": 0, "freeze_authority_enabled": 0, "risks_json": risks("Mint Authority still enabled")})
+    s.add_safety("BOTH", 9.0, {"mint_authority_enabled": 0, "freeze_authority_enabled": 0,
+                               "risks_json": risks("Mint Authority still enabled", "Freeze Authority still enabled")})
+    s.add_safety("FINE", 9.0, {"mint_authority_enabled": 0, "freeze_authority_enabled": 0, "risks_json": risks("Mutable metadata")})
+    s.add_safety("RIGHT", 9.0, {"mint_authority_enabled": 1, "freeze_authority_enabled": 0, "risks_json": risks("Mint Authority still enabled")})
+    for mint in ("WBTC", "BOTH", "FINE"):
+        s.update_state(mint, safety_ts=9.0, mint_authority_enabled=0, freeze_authority_enabled=0)
+
+    assert backfill.fix_authority_flags(s, 100.0) == 2 and backfill.fix_authority_flags(s, 200.0) is None
+    flags = lambda mint: (s.row(mint)["mint_authority_enabled"], s.row(mint)["freeze_authority_enabled"])  # noqa: E731
+    assert (flags("WBTC"), flags("BOTH"), flags("FINE")) == ((1, 0), (1, 1), (0, 0))
+    assert s.latest_safety("WBTC")["mint_authority_enabled"] == 1
+    # the "hide if mint or freeze authority enabled" filter now hides them, and anything unverified
+    s.update_state("FINE", authority_conflict=1)
+    for mint in ("WBTC", "BOTH", "FINE", "RIGHT"):
+        s.db.execute("UPDATE tokens SET created_at = 1.0 WHERE mint = ?", (mint,))
+    assert [r["mint"] for r in s.launches(limit=10, hide_authority=True)] == ["RIGHT"]   # RIGHT has no state flags set in this test

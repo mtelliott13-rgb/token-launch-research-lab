@@ -126,6 +126,7 @@ def measure(row: Mapping[str, Any], extra: Mapping[str, Any], now: float, cfg: M
         "mint_authority": bool(row.get("mint_authority_enabled")),
         "freeze_authority": bool(row.get("freeze_authority_enabled")),
         "rugged": bool(row.get("rugged")),
+        "authority_conflict": bool(row.get("authority_conflict")),
         "no_report": row.get("safety_ts") is None and bool(row.get("safety_miss_count")),
         **checks,
         "metrics": {
@@ -244,6 +245,9 @@ def find_warnings(m: Mapping[str, Any], cfg: Mapping[str, Any]) -> list[dict[str
     if mcap and liquidity is not None and mcap >= w["mcap_to_liquidity"] * liquidity:
         ratio = f"{mcap / liquidity:,.0f}× its" if liquidity > 0 else "backed by no"
         add("mcap_vs_liquidity", f"The market cap is {ratio} pool liquidity, so the price could not survive real selling", "market cap far above liquidity")
+    if m.get("authority_conflict"):
+        add("authority_unverified", "RugCheck's report contradicts itself on whether mint or freeze authority is revoked, so treat it as not revoked",
+            "authorities unverified")
     if m["mint_authority"]:
         add("mint_authority", "Mint authority is enabled: more tokens can be created", "mint authority on")
     if m["freeze_authority"]:

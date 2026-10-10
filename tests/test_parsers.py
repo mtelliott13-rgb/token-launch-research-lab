@@ -213,3 +213,31 @@ def test_view_helpers():
     row = view_row({"mint": FRANK, "boosts_active": 0, "boost_seen_at": 100.0, "dex_id": "pumpswap", "liquidity_usd": 1.0}, now=200.0)
     assert row["paid_boost"] is True and row["graduated"] is True
     assert view_row({"mint": FRANK}, now=200.0)["paid_boost"] is False
+
+
+ACCOUNT_OBJECT = {"lamports": 1132498392, "owner": "11111111111111111111111111111111", "data": ["", "base64"], "executable": False, "space": 0}
+MINT_RISK = {"name": "Mint Authority still enabled", "value": "", "description": "More tokens can be minted by the owner", "level": "danger"}
+FREEZE_RISK = {"name": "Freeze Authority still enabled", "value": "", "description": "Tokens can be frozen", "level": "danger"}
+
+
+def test_parse_report_reads_an_authority_given_as_an_account_object():
+    """RugCheck sometimes gives the top-level authority as the authority's account, not its address (WBTC, 2026-10-09)."""
+    report = {**RUGCHECK, "mintAuthority": ACCOUNT_OBJECT, "freezeAuthority": None,
+              "token": {"mintAuthority": "BCD75RNBHrJJpW4dXVagL5mPjzRLnVZq4YirJdjEYMV7", "freezeAuthority": None},
+              "risks": [MINT_RISK]}
+    parsed = parse_report(report)
+    assert (parsed["mint_authority_enabled"], parsed["freeze_authority_enabled"], parsed["authority_conflict"]) == (1, 0, 0)
+    # the object alone is enough, and so is the address under "token" alone
+    assert parse_report({**report, "token": {}})["mint_authority_enabled"] == 1
+    assert parse_report({**report, "mintAuthority": None})["mint_authority_enabled"] == 1
+    both = parse_report({**report, "freezeAuthority": ACCOUNT_OBJECT, "risks": [MINT_RISK, FREEZE_RISK]})
+    assert (both["mint_authority_enabled"], both["freeze_authority_enabled"], both["authority_conflict"]) == (1, 1, 0)
+
+
+def test_parse_report_marks_a_conflict_when_fields_and_risk_list_disagree():
+    assert parse_report(RUGCHECK)["authority_conflict"] == 0                                  # both say revoked
+    fields_only = parse_report({**RUGCHECK, "mintAuthority": "5J8KZ6YAEv35ZZsaXxnrpp88uTarrLQUWSRCUtkLnoMR"})
+    assert fields_only["mint_authority_enabled"] == 1 and fields_only["authority_conflict"] == 1   # fields say enabled, list silent
+    list_only = parse_report({**RUGCHECK, "risks": [*RUGCHECK["risks"], FREEZE_RISK]})
+    assert list_only["freeze_authority_enabled"] == 0 and list_only["authority_conflict"] == 1     # list says enabled, fields say revoked
+    assert parse_report({"score": 1})["authority_conflict"] == 0

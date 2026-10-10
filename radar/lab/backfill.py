@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import bisect
 import itertools
+import json
 import logging
 from typing import Any, Mapping
 
@@ -179,3 +180,40 @@ def queue_descriptions(store: Store, cfg: Mapping[str, Any], now: float) -> int 
         store.set_meta(DESCRIPTIONS_KEY, str(now))
     log.info("descriptions: %d existing tokens queued for a metadata fetch", cur.rowcount)
     return cur.rowcount
+
+
+AUTHORITY_KEY = "authority_flags_fixed_at"
+
+
+def fix_authority_flags(store: Store, now: float) -> int | None:
+    """Once: correct safety reports saved while a live mint or freeze authority could be read as revoked.
+
+    The raw reports were not kept, but their risk lists were, and for every token where the
+    two disagreed the chain agreed with the risk list (checked 2026-10-09). So a report whose
+    risk list names an authority as enabled gets that flag set. Returns how many tokens changed.
+    """
+    from radar.collectors.rugcheck import risk_list_says_enabled
+
+    if store.meta(AUTHORITY_KEY):
+        return None
+    mints = set()
+    with store.tx():
+        rows = store.db.execute(
+            "SELECT rowid, mint, risks_json, mint_authority_enabled, freeze_authority_enabled FROM safety "
+            "WHERE risks_json LIKE '%uthority%'"
+        ).fetchall()
+        for rowid, mint, risks_json, mint_on, freeze_on in rows:
+            risks = json.loads(risks_json or "[]")
+            fixed = (max(mint_on or 0, risk_list_says_enabled(risks, "mint")), max(freeze_on or 0, risk_list_says_enabled(risks, "freeze")))
+            if fixed != (mint_on or 0, freeze_on or 0):
+                store.db.execute(
+                    "UPDATE safety SET mint_authority_enabled = ?, freeze_authority_enabled = ? WHERE rowid = ?", (*fixed, rowid)
+                )
+                mints.add(mint)
+        for mint in mints:
+            latest = store.latest_safety(mint)
+            store.update_state(mint, mint_authority_enabled=latest["mint_authority_enabled"],
+                               freeze_authority_enabled=latest["freeze_authority_enabled"])
+        store.set_meta(AUTHORITY_KEY, str(now))
+    log.info("safety: mint/freeze authority corrected for %d tokens that had been shown as revoked", len(mints))
+    return len(mints)

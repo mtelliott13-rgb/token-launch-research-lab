@@ -284,9 +284,11 @@ function flags(r) {
   } else if (r.safety_ts == null) {
     out.push(badge("idle", "Unchecked", "No safety report yet. Open the token to fetch one."));
   } else {
-    if (r.mint_authority_enabled) out.push(badge("crit", "Mint authority", "The creator can still mint more tokens"));
-    if (r.freeze_authority_enabled) out.push(badge("crit", "Freeze authority", "The creator can freeze holders' tokens"));
-    if (!r.mint_authority_enabled && !r.freeze_authority_enabled) out.push(badge("ok", "Authorities revoked", "Mint and freeze authority are both disabled"));
+    if (r.mint_authority_enabled) out.push(badge("crit", "Mint authority", "More tokens can still be minted"));
+    if (r.freeze_authority_enabled) out.push(badge("crit", "Freeze authority", "Holders' tokens can be frozen"));
+    // Two parts of the safety report disagree: say so rather than vouch for it.
+    if (r.authority_conflict) out.push(badge("warn", "Unverified", "RugCheck's report contradicts itself on whether mint or freeze authority is revoked. Treat it as not revoked."));
+    else if (!r.mint_authority_enabled && !r.freeze_authority_enabled) out.push(badge("ok", "Authorities revoked", "Mint and freeze authority are both disabled"));
     if (r.top10_pct != null) {
       const kind = r.top10_pct > 50 ? "crit" : r.top10_pct > 30 ? "warn" : "ok";
       out.push(badge(kind, `Top 10: ${r.top10_pct.toFixed(0)}%`, "Share of supply held by the 10 largest holders, excluding liquidity pools"));
@@ -332,7 +334,7 @@ function passes(r) {
   const f = state.filters;
   if (f.liq > 0 && (r.liquidity_usd || 0) < f.liq) return false;
   if (f.top10 < 100 && r.top10_pct != null && r.top10_pct > f.top10) return false;
-  if (f.auth && (r.mint_authority_enabled || r.freeze_authority_enabled)) return false;
+  if (f.auth && (r.mint_authority_enabled || r.freeze_authority_enabled || r.authority_conflict)) return false;
   if (f.grad && !r.graduated) return false;
   return true;
 }
@@ -473,11 +475,13 @@ function renderSafety(s, note) {
   if (!s) { box.className = "muted"; box.textContent = note || "No safety report available."; return; }
   const yes = (on, bad, good) => on ? badge("crit", bad) : badge("ok", good);
   const level = (l) => ({ danger: "crit", warn: "warn" }[l] || "idle");
+  const authority = (on) => on ? badge("crit", "Enabled") : s.authority_conflict
+    ? badge("warn", "Unverified", "The report's fields say revoked but its risk list says otherwise, or the other way round") : badge("ok", "Revoked");
   box.className = "";
   box.replaceChildren(
     h("div", { class: "grid" },
-      kv("Mint authority", yes(s.mint_authority_enabled, "Enabled", "Revoked")),
-      kv("Freeze authority", yes(s.freeze_authority_enabled, "Enabled", "Revoked")),
+      kv("Mint authority", authority(s.mint_authority_enabled)),
+      kv("Freeze authority", authority(s.freeze_authority_enabled)),
       kv("Flagged as rugged", yes(s.rugged, "Yes", "No")),
       kv("Top 10 holders", s.top10_pct == null ? DASH : s.top10_pct.toFixed(1) + "%"),
       kv("Largest holder", s.top_holder_pct == null ? DASH : s.top_holder_pct.toFixed(1) + "%"),

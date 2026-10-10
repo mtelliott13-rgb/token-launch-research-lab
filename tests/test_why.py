@@ -230,3 +230,9 @@ def test_peak_after_appearing_is_filled_in_once_24_hours_have_passed():
 
     (early, later), _, _ = run(lambda request: None, flow)
     assert early is None and later == 2.5
+
+
+def test_contradictory_authority_report_is_a_warning():
+    a = analysed(token(safety_ts=NOW - 60, authority_conflict=1), {"safety": safety()})
+    assert [w["key"] for w in a["warnings"]] == ["authority_unverified"] and a["pattern"].endswith("/warnings")
+    assert "authorities unverified" in a["explanation"]

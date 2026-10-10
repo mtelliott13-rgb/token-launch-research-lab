@@ -24,6 +24,7 @@ _VIEW_FIELDS = (
     "migrated_at", "trending_rank", "watched", "profile_seen_at", "safety_ts",
     "mint_authority_enabled", "freeze_authority_enabled", "top10_pct", "top_holder_pct",
     "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged", "total_holders", "bot_volume", "theme",
+    "authority_conflict",
 )
 
 

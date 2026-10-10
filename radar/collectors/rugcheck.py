@@ -8,6 +8,12 @@ lpLockedPct, so we use the full report, /tokens/{mint}/report:
    marketType, liquidityAAccount, liquidityBAccount, lp{baseUSD, quoteUSD, lpLockedUSD,
    lpLockedPct}}], risks[{name, value, description, score, level}], score, score_normalised,
    rugged, totalHolders, graphInsidersDetected, ...}
+Verified 2026-10-09 against the chain (public Solana RPC, getMultipleAccounts): the top-level
+mintAuthority / freezeAuthority is null when revoked, but when the authority is set it is
+sometimes the address and sometimes an object describing the authority's account
+({lamports, owner, data, ...}). token.mintAuthority / token.freezeAuthority is always the
+address or null. Reading only strings made 43 tokens with a live authority look revoked;
+RugCheck's own risk list ("Mint Authority still enabled") was right for all 43.
 Verified 2026-10-09: when it has nothing it answers HTTP 400, not 404:
   {"error": "not found"}           a real token it has no report for (often only for the
                                    first seconds after a graduation, sometimes for good)
@@ -37,7 +43,7 @@ _NO_AUTHORITY = {"", "11111111111111111111111111111111"}
 # Fields copied onto token_state for list views and filters.
 STATE_FIELDS = (
     "mint_authority_enabled", "freeze_authority_enabled", "top10_pct", "top_holder_pct",
-    "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged", "total_holders",
+    "lp_locked_pct", "risk_score", "risk_score_normalised", "rugged", "total_holders", "authority_conflict",
 )
 _CLEAR_MISSES = {"safety_miss_count": 0, "safety_miss_at": None, "safety_retry_at": None}
 
@@ -45,8 +51,17 @@ _CLEAR_MISSES = {"safety_miss_count": 0, "safety_miss_at": None, "safety_retry_a
 # ---- parsing (pure) --------------------------------------------------------
 
 def _authority_enabled(report: dict[str, Any], key: str) -> int:
-    value = report.get(key) or (report.get("token") or {}).get(key)
-    return int(isinstance(value, str) and value not in _NO_AUTHORITY)
+    """1 if the report's fields say this authority is still set (as an address or an account object)."""
+    def is_set(value: Any) -> bool:
+        return (isinstance(value, str) and value not in _NO_AUTHORITY) or (isinstance(value, dict) and bool(value))
+    return int(is_set(report.get(key)) or is_set((report.get("token") or {}).get(key)))
+
+
+def risk_list_says_enabled(risks: Any, which: str) -> int:
+    """1 if RugCheck's risk list names this authority ("mint" or "freeze") as still enabled."""
+    if not isinstance(risks, list):
+        return 0
+    return int(any(isinstance(r, dict) and str(r.get("name") or "").lower().startswith(f"{which} authority") for r in risks))
 
 
 def _pool_accounts(report: dict[str, Any]) -> set[str]:
@@ -87,9 +102,16 @@ def parse_report(report: dict[str, Any]) -> dict[str, Any]:
         for r in report.get("risks") or []
         if isinstance(r, dict)
     ]
+    mint_on, freeze_on = _authority_enabled(report, "mintAuthority"), _authority_enabled(report, "freezeAuthority")
+    raw_risks = report.get("risks")
     return {
-        "mint_authority_enabled": _authority_enabled(report, "mintAuthority"),
-        "freeze_authority_enabled": _authority_enabled(report, "freezeAuthority"),
+        "mint_authority_enabled": mint_on,
+        "freeze_authority_enabled": freeze_on,
+        # The report says it twice: in its fields and in its risk list. If the two ever
+        # disagree we do not know which is right, and the dashboard says "Unverified".
+        "authority_conflict": int(
+            (mint_on, freeze_on) != (risk_list_says_enabled(raw_risks, "mint"), risk_list_says_enabled(raw_risks, "freeze"))
+        ),
         "top10_pct": round(sum(h["pct"] for h in holders[:10]), 2) if have_holders else None,
         "top_holder_pct": round(holders[0]["pct"], 2) if holders else (0.0 if have_holders else None),
         "lp_locked_pct": _lp_locked_pct(report),

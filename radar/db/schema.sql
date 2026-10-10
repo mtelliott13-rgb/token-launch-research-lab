@@ -99,7 +99,8 @@ CREATE TABLE IF NOT EXISTS safety (
     creator                     TEXT,
     creator_balance             REAL,
     risks_json                  TEXT,
-    top_holders_json            TEXT
+    top_holders_json            TEXT,
+    authority_conflict          INTEGER    -- 1 = the report's fields and its risk list disagree on mint/freeze authority
 );
 CREATE INDEX IF NOT EXISTS idx_safety_mint_ts ON safety(mint, ts);
 
@@ -178,7 +179,8 @@ CREATE TABLE IF NOT EXISTS token_state (
     -- we fetch from, 'failed' = could not be fetched.
     desc_state                  TEXT,
     desc_tries                  INTEGER NOT NULL DEFAULT 0,
-    desc_retry_at               REAL
+    desc_retry_at               REAL,
+    authority_conflict          INTEGER    -- from the latest safety report; shown as "Unverified"
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);
