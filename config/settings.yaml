@@ -69,6 +69,13 @@ outcomes:
   runner_multiple: 3            # "runner": peak in the first 24h is 3x to 10x p0
   moonshot_multiple: 10         # "moonshot": 10x or more
 
+# Patterns page: themes and launch times compared by graduation rate, peak and fate.
+# Only pump.fun launches we saw being created, with a complete outcome, are counted.
+patterns:
+  min_complete: 5000            # below this many complete outcomes the page says the data is not ready
+  min_group_n: 300              # a row with fewer tokens than this is marked as too small to compare
+  cache_s: 300
+
 # Data retention. Once a token's 7d follow-up is in and its outcome is final, we decide once
 # what to keep of its snapshots:
 #   kept    all snapshots stay: it graduated, reached keep_min_peak_mcap_usd, or is watched

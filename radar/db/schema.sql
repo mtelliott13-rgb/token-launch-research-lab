@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS tokens (
     initial_buy_tokens  REAL,
     initial_buy_sol     REAL,
     initial_mcap_sol    REAL,
-    mayhem_mode         INTEGER
+    mayhem_mode         INTEGER,
+    theme               TEXT       -- political / celebrity / ai_character / animal / other (config/themes.yaml)
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_created ON tokens(created_at);
 CREATE INDEX IF NOT EXISTS idx_tokens_creator ON tokens(creator);

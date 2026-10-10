@@ -1,0 +1,46 @@
+# Theme tags. Each token gets one tag from its name and description (when we have one).
+# The ticker symbol is not used: tickers are often initials, and "AI" for "Apple Inu" is not an AI token.
+# Themes are tried from top to bottom and the first one that matches wins, so "Trump Dog" is
+# political and "AI Cat" is an AI character. A token that matches nothing is "other".
+#
+#   words     must appear as a whole word (or phrase): "cat" matches "Fat Cat" and "FatCat",
+#             but not "catalyst". Use this for short or ambiguous words.
+#   contains  may appear anywhere, even inside a longer word: "trump" matches "TRUMPCOIN".
+#             Use this only for distinctive words.
+#
+# Edit freely: every token is re-tagged the next time the app starts after this file changes.
+political:
+  words: [maga, potus, president, election, vote, senate, congress, democrat, democrats, republican, republicans,
+          gop, tariff, tariffs, vance, barron, ivanka, harris, pelosi, bernie, rfk, kennedy, desantis, newsom,
+          aoc, modi, xi jinping, milei, netanyahu, zelensky, kim jong, white house, whitehouse, nato, iran, israel,
+          ukraine, russia, hormuz, communist, fascist, epstein, hitler, mussolini, stalin, lenin, mao, kirk,
+          doge department, government, congressman, senator, governor, mayor, politics, political, liberal,
+          conservative, patriot, america first]
+  contains: [trump, biden, kamala, obama, putin, melania, clinton]
+celebrity:
+  words: [elon, musk, kanye, taylor swift, drake, bieber, rogan, tate, mr beast, ronaldo, messi,
+          lebron, haaland, snoop, rihanna, beyonce, eminem, zuck, bezos, altman, cz, vitalik, saylor, jenner,
+          iggy, hawk tuah, dicaprio, oprah, tyson, mcgregor, kai cenat, ishowspeed, adin ross, diddy,
+          travis scott, megan fox, lil uzi, uzi, sydney sweeney, sweeney, mbappe, neymar, khaby, pewdiepie,
+          logan paul, jake paul, ansem, alon, toly, billie eilish, ariana, zendaya, brad pitt, depp, keanu,
+          the rock, cardi, nicki, doja, post malone, weeknd, shaq, kobe, michael jordan, tom brady, mahomes, kelce,
+          tucker, joe rogan, jensen huang, bill gates, buffett, mark cuban, beatles, kardashians]
+  contains: [elonmusk, kardashian, mrbeast, zuckerberg, cristiano, kanyewest]
+ai_character:
+  words: [ai, agi, asi, agent, agents, gpt, llm, bot, robot, android, cyborg, neural, sentient, claude,
+          grok, gemini, copilot, llama, deepseek, mistral, eliza, zerebro, truth terminal, terminal,
+          artificial, intelligent, intelligence, superintelligence, superintelligent, singularity, clanker,
+          clankers, chatbot, waifu, vtuber, neuro, machine learning, autonomous, swarm, mcp]
+  contains: [chatgpt, openai, ai16z, aixbt, anthropic, agentic, gpt]
+animal:
+  words: [cat, cats, kitty, kitten, neko, dog, dogs, doggo, puppy, pup, inu, shib, wif, bonk, frog, toad,
+          pepe, monkey, ape, apes, chimp, gorilla, orangutan, penguin, bear, bull, fish, whale, orca, shark,
+          dolphin, hamster, hippo, capybara, bird, duck, goose, owl, eagle, chicken, rooster, goat, pig, cow,
+          fox, wolf, lion, tiger, panda, rabbit, bunny, rat, mouse, squirrel, seal, otter, horse, turtle,
+          snake, lizard, croc, crocodile, dino, dinosaur, dragon, spider, deer, moose, camel,
+          llama alpaca, alpaca, sloth, koala, kangaroo, raccoon, beaver, badger, hedgehog, parrot, crab,
+          lobster, octopus, squid, worm, snail, butterfly, unicorn, pony, donkey, zebra, giraffe, elephant,
+          rhino, leopard, cheetah, jaguar, puma, lynx, paws, paw, pets, animal, animals, moodeng,
+          pnut, popcat, cate, doge]
+  contains: [doge, shiba, pengu, penguin, hamster, capybara, monkey, kitty, kitten, puppy, froggy, catcoin,
+             dogcoin, dogwif, catwif, chimp]

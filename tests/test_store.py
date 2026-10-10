@@ -63,7 +63,7 @@ def test_older_database_gets_new_columns_and_holder_counts(tmp_path):
     s.add_safety("M1", 9.0, {"total_holders": 42})
     s.update_state("M1", safety_ts=9.0)
     # Put the database back to how the first release left it, including the old outcome label.
-    for index in ("idx_state_followup", "idx_state_retention", "idx_outcomes_peak_fate"):
+    for index in ("idx_state_followup", "idx_state_retention", "idx_outcomes_peak_fate", "idx_tokens_first_seen"):
         s.db.execute(f"DROP INDEX {index}")
     for table, columns in ADDED_COLUMNS.items():
         for column in columns:

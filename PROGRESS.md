@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-10-09, Phase 2 built, with peak/fate verdicts and data retention.
+Last updated: 2026-10-09, Phase 2 built, with peak/fate verdicts, data retention, theme tags and the Patterns page.
 
 ## Start the dashboard
 
@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 80 tests passing (`uv run pytest`), including Phase 2.
+- 85 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -134,6 +134,23 @@ sells and price change, so a pruned token still has its signal inputs at 1m, 5m,
   file never shrinks; freed space is reused.
 - Graduated tokens keep everything, not only their first 4 hours, so exit rules can be tested
   over hours and days. Cutting them to 4 hours as well would save roughly 0.15 GB a week more.
+
+## Theme tags and the Patterns page (added 2026-10-09)
+
+- Every token gets one theme: political, celebrity, AI character, animal or other. The rules are
+  keyword lists in `config/themes.yaml`, matched against the name and description; themes are
+  tried in that order and the first match wins. Code: `radar/scoring/themes.py`. All tokens are
+  re-tagged on the next start after the file changes.
+- On the first 48,500 tokens: 79% other, 14% animal, 5% AI character, 2% celebrity, 1% political.
+- Only 400 of those tokens have a description (DexScreener profiles). pump.fun descriptions sit
+  behind each token's metadata link, which we do not fetch, so in practice the name decides.
+- http://localhost:8000/patterns compares themes, launch hour and launch day by graduation rate,
+  peak and fate, with the token count on every row. It counts only pump.fun launches we saw being
+  created whose outcome is complete. Until 5,000 are complete it shows a "not ready" note with
+  dates: themes about 2026-10-16, launch hour about 2026-10-17, launch day about 2026-10-23.
+  Settings under `patterns:`.
+- "Complete" leaves out launches that are missing a figure (never priced, or a checkpoint was
+  skipped while the collector was off). If those differ from the rest, the page is biased.
 
 ## Open decisions
 

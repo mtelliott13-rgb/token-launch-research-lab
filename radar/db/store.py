@@ -17,6 +17,7 @@ GRADUATED_SQL = "(s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL)"
 # Columns added to schema.sql after databases already existed. CREATE TABLE IF NOT EXISTS
 # leaves an existing table as it is, so older databases get these added on start.
 ADDED_COLUMNS = {
+    "tokens": {"theme": "TEXT"},
     "token_state": {
         "total_holders": "INTEGER",
         "safety_miss_count": "INTEGER NOT NULL DEFAULT 0",
@@ -37,6 +38,7 @@ ADDED_COLUMNS = {
 }
 # Indexes on those columns, created after the columns are sure to exist.
 ADDED_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_tokens_first_seen ON tokens(first_seen_at)",
     "CREATE INDEX IF NOT EXISTS idx_state_followup ON token_state(followup_at)",
     "CREATE INDEX IF NOT EXISTS idx_outcomes_peak_fate ON outcomes(peak, fate)",
     # Tokens whose follow-ups are finished and whose snapshots await a keep-or-drop decision.
@@ -56,8 +58,10 @@ FOLLOWUP_FIELDS = (
 
 
 class Store:
-    def __init__(self, path: str | Path, first_followup_s: float = 90.0):
+    def __init__(self, path: str | Path, first_followup_s: float = 90.0, tagger: Any = None):
         self.path = str(path)
+        # Gives each token its theme tag (radar.scoring.themes.Tagger); None leaves themes empty.
+        self.tagger = tagger
         # How long after we first see a token its first follow-up check falls due.
         self.first_followup_s = first_followup_s
         if str(path) != ":memory:":
@@ -124,7 +128,12 @@ class Store:
         """Insert a token, or fill in fields we did not have yet. Returns True if it is new."""
         fields = {k: v for k, v in fields.items() if v is not None}
         self._check("tokens", fields)
-        is_new = self.db.execute("SELECT 1 FROM tokens WHERE mint = ?", (mint,)).fetchone() is None
+        had = self.db.execute("SELECT name, description FROM tokens WHERE mint = ?", (mint,)).fetchone()
+        is_new = had is None
+        if self.tagger and (is_new or any(had[k] is None and k in fields for k in ("name", "description"))):
+            # Tag on first sight, and again when a name or description we lacked arrives.
+            name, description = ((had[k] if had and had[k] is not None else fields.get(k)) for k in ("name", "description"))
+            fields["theme"] = self.tagger.tag(name, description)
         with self.tx():
             if is_new:
                 cols = ["mint", "source", "first_seen_at", *fields]
@@ -137,7 +146,7 @@ class Store:
                     (mint, first_seen_at + self.first_followup_s),
                 )
             elif fields:
-                sets = ", ".join(f"{k} = COALESCE({k}, ?)" for k in fields)
+                sets = ", ".join(f"{k} = ?" if k == "theme" else f"{k} = COALESCE({k}, ?)" for k in fields)
                 self.db.execute(f"UPDATE tokens SET {sets} WHERE mint = ?", (*fields.values(), mint))
         return is_new
 

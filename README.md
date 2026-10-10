@@ -36,6 +36,13 @@ moonshot), how complete the follow-up checks are, and collector health. Every to
 up again 1m, 5m, 15m, 1h, 4h, 24h, 72h and 7d after it is first seen, so outcomes only become
 complete once a token is a week old.
 
+## The Patterns page
+
+http://localhost:8000/patterns compares token themes (political, celebrity, AI character, animal,
+other), launch hour and launch day by graduation rate, peak and fate. It only counts launches
+whose outcome is complete and shows the sample size on every row. Theme keywords are in
+`config/themes.yaml`.
+
 ## Data sources (all free, no keys)
 
 | Source | Used for |

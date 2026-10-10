@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from radar.db.store import Store
-from radar.lab.followups import checkpoints
+from radar.lab.followups import allowed_late, checkpoints
 
 OUTCOME_VALUE_FIELDS = (
     "p0_price", "peak_multiple_24h", "multiple_1h", "multiple_24h", "multiple_72h", "multiple_7d", "dead_at_7d",
@@ -51,11 +51,96 @@ def collect(db: sqlite3.Connection, cfg: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+PATTERN_COUNTS = ("n", "graduated", "moonshot", "runner", "flat", "rugged", "dead", "alive")
+# A guess at the share of launches that end with a complete outcome, used only for the
+# "ready by" estimate until we can measure it.
+ASSUMED_COMPLETE_SHARE = 0.75
+HOURS_PER_WEEK = 168
+
+
+def patterns(db: sqlite3.Connection, cfg: Mapping[str, Any], themes: list[str]) -> dict[str, Any]:
+    """Themes and launch times compared, over pump.fun launches with a complete outcome.
+
+    Launch time is returned per hour of the week in UTC (0 = Sunday 00:00), so the page can
+    show hours and weekdays in the viewer's own time zone.
+    """
+    blank = lambda: dict.fromkeys(PATTERN_COUNTS, 0)  # noqa: E731
+    by_theme = {theme: blank() for theme in themes}
+    by_hour = [blank() for _ in range(HOURS_PER_WEEK)]
+    cur = db.execute(
+        "SELECT COALESCE(t.theme, 'other'), "
+        "CAST(strftime('%w', t.created_at, 'unixepoch') AS INTEGER) * 24 + CAST(strftime('%H', t.created_at, 'unixepoch') AS INTEGER), "
+        "COUNT(*), SUM(s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL), "
+        "SUM(o.peak = 'moonshot'), SUM(o.peak = 'runner'), SUM(o.peak = 'flat'), "
+        "SUM(o.fate = 'rugged'), SUM(o.fate = 'dead'), SUM(o.fate = 'alive') "
+        "FROM outcomes o JOIN tokens t ON t.mint = o.mint JOIN token_state s ON s.mint = o.mint "
+        "WHERE o.complete = 1 AND t.source = 'pumpportal' GROUP BY 1, 2"
+    )
+    for theme, hour, *values in cur:
+        for group in (by_theme.setdefault(theme, blank()), by_hour[hour]):
+            for key, value in zip(PATTERN_COUNTS, values):
+                group[key] += value or 0
+    complete = sum(g["n"] for g in by_theme.values())
+
+    launches, first_launch, final = db.execute(
+        "SELECT COUNT(*), MIN(t.first_seen_at), COALESCE(SUM(o.final), 0) FROM tokens t "
+        "LEFT JOIN outcomes o ON o.mint = t.mint WHERE t.source = 'pumpportal'"
+    ).fetchone()
+    # A token's outcome can be complete once its last follow-up window has closed.
+    last = checkpoints(cfg["followups"])[-1][1]
+    settle_s = last + allowed_late(last, cfg["followups"])
+    share = complete / final if final >= 1000 else ASSUMED_COMPLETE_SHARE
+    needed = int(cfg["patterns"]["min_complete"] / max(share, 0.05)) + 1
+    nth = db.execute(
+        "SELECT first_seen_at FROM tokens WHERE source = 'pumpportal' ORDER BY first_seen_at LIMIT 1 OFFSET ?", (needed - 1,)
+    ).fetchone()
+    tagged = dict(db.execute("SELECT COALESCE(theme, 'untagged'), COUNT(*) FROM tokens GROUP BY 1").fetchall())
+    samples = {
+        theme: [r[0] for r in db.execute(
+            "SELECT name FROM tokens WHERE theme = ? AND name IS NOT NULL GROUP BY name "
+            "ORDER BY MAX(first_seen_at) DESC LIMIT 12", (theme,))]
+        for theme in themes
+    }
+    return {
+        "themes": [{"theme": theme, **counts} for theme, counts in by_theme.items()],
+        "hours_utc": by_hour,
+        "complete": complete,
+        "launches": launches,
+        "final": final,
+        "first_launch_at": first_launch,
+        "ready": {
+            # None = not enough launches recorded yet to say.
+            "themes_at": nth[0] + settle_s if nth else None,
+            "hours_at": first_launch + 86400 + settle_s if first_launch else None,
+            "weekdays_at": first_launch + 7 * 86400 + settle_s if first_launch else None,
+            "launches_needed": needed,
+        },
+        "tagged": tagged,
+        "with_description": db.execute("SELECT COUNT(description) FROM tokens").fetchone()[0],
+        "samples": samples,
+    }
+
+
+def _read_only(store: Store) -> sqlite3.Connection:
+    return sqlite3.connect(f"{Path(store.path).resolve().as_uri()}?mode=ro", uri=True)
+
+
+def patterns_from(store: Store, cfg: Mapping[str, Any], themes: list[str]) -> dict[str, Any]:
+    """Run `patterns` on its own read-only connection (safe to call from another thread)."""
+    if store.path == ":memory:":
+        return patterns(store.db, cfg, themes)
+    db = _read_only(store)
+    try:
+        return patterns(db, cfg, themes)
+    finally:
+        db.close()
+
+
 def collect_from(store: Store, cfg: Mapping[str, Any]) -> dict[str, Any]:
     """Run `collect` on its own read-only connection (safe to call from another thread)."""
     if store.path == ":memory:":
         return collect(store.db, cfg)
-    db = sqlite3.connect(f"{Path(store.path).resolve().as_uri()}?mode=ro", uri=True)
+    db = _read_only(store)
     try:
         return collect(db, cfg)
     finally:

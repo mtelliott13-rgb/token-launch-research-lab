@@ -26,6 +26,7 @@ from radar.health import Health
 from radar.http import SourceClient, SourceError
 from radar.lab import backfill, retention, stats
 from radar.lab.followups import step_in_delay
+from radar.scoring.themes import Tagger
 from radar.view import is_mint, view_row
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,11 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
     health.register("retention", label="Retention (disk)")
     ctx = Ctx(
         cfg=cfg,
-        store=Store(ROOT / cfg["database"]["path"], first_followup_s=step_in_delay(0, cfg["followups"])),
+        store=Store(
+            ROOT / cfg["database"]["path"],
+            first_followup_s=step_in_delay(0, cfg["followups"]),
+            tagger=Tagger.from_file(),
+        ),
         health=health,
         bus=EventBus(),
         dex=SourceClient("dexscreener", src["dexscreener"]["pairs_per_min"], http, health),
@@ -81,6 +86,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         app.state.ctx = ctx
         backfill.run(ctx.store, cfg, time.time())
         backfill.upgrade(ctx.store, cfg, time.time())
+        backfill.retag_themes(ctx.store)
         collectors = {
             "pumpportal": pumpportal.run,
             "dexscreener:refresh": dexscreener.refresh_loop,
@@ -138,6 +144,24 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
         return {**cached[1], "as_of": cached[0], "now": now, "sources": ctx.health.snapshot(),
                 "since_start": dict(ctx.followup_counts), "thresholds": cfg["outcomes"],
                 "retention_policy": cfg["retention"], "retention_since_start": dict(ctx.retention_counts)}
+
+    @app.get("/patterns")
+    async def patterns_page() -> FileResponse:
+        return FileResponse(STATIC / "patterns.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/patterns")
+    async def patterns(request: Request) -> dict[str, Any]:
+        """Themes and launch times compared. Read on a separate connection, like /api/data."""
+        ctx = ctx_of(request)
+        now = time.time()
+        cached = getattr(app.state, "patterns_cache", None)
+        if cached is None or now - cached[0] > cfg["patterns"]["cache_s"]:
+            args = (ctx.store, cfg, ctx.store.tagger.themes)
+            in_memory = ctx.store.path == ":memory:"
+            result = stats.patterns_from(*args) if in_memory else await asyncio.to_thread(stats.patterns_from, *args)
+            cached = (now, result)
+            app.state.patterns_cache = cached
+        return {**cached[1], "as_of": cached[0], "now": now, "settings": cfg["patterns"], "thresholds": cfg["outcomes"]}
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:

@@ -134,3 +134,26 @@ def upgrade(store: Store, cfg: Mapping[str, Any], now: float) -> None:
             )
             store.set_meta(ENRICH_KEY, str(now))
         log.info("follow-ups: volume and buy/sell figures added to %d existing checkpoint rows", cur.rowcount)
+
+
+THEMES_KEY = "themes_version"
+
+
+def retag_themes(store: Store) -> int | None:
+    """Tag every token again when config/themes.yaml has changed (or was never applied).
+
+    Returns how many tags changed, or None if the rules are the ones already applied.
+    """
+    tagger = store.tagger
+    if tagger is None or store.meta(THEMES_KEY) == tagger.version:
+        return None
+    changed = 0
+    with store.tx():
+        for mint, name, description, theme in store.db.execute("SELECT mint, name, description, theme FROM tokens").fetchall():
+            tag = tagger.tag(name, description)
+            if tag != theme:
+                store.db.execute("UPDATE tokens SET theme = ? WHERE mint = ?", (tag, mint))
+                changed += 1
+        store.set_meta(THEMES_KEY, tagger.version)
+    log.info("themes: rules changed, %d tokens re-tagged", changed)
+    return changed

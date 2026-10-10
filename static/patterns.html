@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meme Radar: Patterns</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #151a21; --raised: #1b222b; --line: #252d38;
+    --ink: #e6e9ee; --ink2: #a7b0bd; --muted: #6f7a89;
+    --accent: #5aa9ff; --good: #3fb68b; --warn: #e0a339; --crit: #f0616d;
+    --up: #2bb3a3; --down: #f0616d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8; --panel: #ffffff; --raised: #f0f2f5; --line: #e1e5ea;
+      --ink: #161a20; --ink2: #4a5361; --muted: #7b8494;
+      --accent: #1f6fd1; --good: #1c8a63; --warn: #a86b00; --crit: #c9303f;
+      --up: #128a7e; --down: #c9303f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .muted { color: var(--muted); }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+  #conn, .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink2); white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mark { font-size: 10px; }
+  .mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.crit { color: var(--crit); } .mark.idle { color: var(--muted); }
+  #stats { margin-left: auto; color: var(--ink2); }
+  .nav { display: flex; gap: 4px; }
+  .nav a { padding: 2px 10px; border-radius: 999px; color: var(--ink2); text-decoration: none; }
+  .nav a:hover { color: var(--ink); }
+  .nav a[aria-current=page] { background: var(--raised); color: var(--ink); }
+
+
+  main { display: grid; gap: 12px; padding: 12px 16px; max-width: 1100px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  section > .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  section h2 { font-size: 14px; margin: 0; }
+  .head .sub { color: var(--muted); }
+  .body { padding: 10px 12px; }
+  .note { color: var(--muted); margin-top: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0; }
+  .tile .d { color: var(--ink2); }
+  table { width: 100%; border-collapse: collapse; }
+  th { color: var(--muted); font-weight: 500; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th.num { text-align: right; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td.what { width: 340px; min-width: 200px; }
+  td.what .desc { color: var(--muted); }
+  td.barcell { min-width: 120px; }
+  .bar { height: 14px; min-width: 1px; background: var(--accent); border-radius: 0 4px 4px 0; }
+  tr:hover td { background: var(--raised); }
+  .wrap { overflow-x: auto; }
+  .err { color: var(--muted); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .banner { background: var(--panel); border: 1px solid var(--warn); border-radius: 8px; padding: 12px 14px; }
+  .banner h2 { font-size: 14px; margin: 0 0 4px; }
+  .banner ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink2); }
+  tr.small td { color: var(--muted); }
+  tr.total td { font-weight: 600; border-top: 1px solid var(--muted); }
+  .samples { color: var(--ink2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meme Radar</h1>
+  <nav class="nav"><a href="/">Dashboard</a><a href="/data">Data</a><a href="/patterns" aria-current="page">Patterns</a></nav>
+  <span id="conn"><span class="mark idle">●</span><span>loading</span></span>
+  <div id="stats"></div>
+</header>
+
+<main>
+  <div class="banner" id="banner" hidden></div>
+
+  <section>
+    <div class="head"><h2>By theme</h2><span class="sub" id="theme-sub"></span></div>
+    <div class="wrap"><table><thead id="theme-head"></thead><tbody id="theme-body"></tbody></table></div>
+    <div class="body"><div class="note" id="theme-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>By launch hour</h2><span class="sub" id="hour-sub"></span></div>
+    <div class="wrap"><table><thead id="hour-head"></thead><tbody id="hour-body"></tbody></table></div>
+    <div class="body"><div class="note" id="hour-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>By launch day</h2><span class="sub" id="day-sub"></span></div>
+    <div class="wrap"><table><thead id="day-head"></thead><tbody id="day-body"></tbody></table></div>
+    <div class="body"><div class="note" id="day-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>How tokens are tagged</h2><span class="sub">all tokens recorded, whether or not their outcome is complete</span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Theme</th><th></th><th class="num">Tokens</th><th class="num">Share</th><th>Latest examples</th></tr></thead>
+      <tbody id="tagged"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="tagged-note"></div></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v; else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const DASH = "–";
+const fmtInt = (v) => v == null ? DASH : Math.round(v).toLocaleString("en-US");
+const fmtRate = (n, total) => !total ? DASH : (100 * n / total).toFixed(1) + "%";
+const fmtDate = (ts) => ts == null ? "not known yet" : new Date(ts * 1000).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric" });
+const MARKS = { ok: "✓", crit: "✕" };
+const THEME_NAMES = { political: "Political", celebrity: "Celebrity", ai_character: "AI character", animal: "Animal", other: "Other" };
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const KEYS = ["n", "graduated", "moonshot", "runner", "flat", "rugged", "dead", "alive"];
+const num = (v, title) => h("td", { class: "num", title }, v);
+const add = (a, b) => { for (const k of KEYS) a[k] += b[k]; return a; };
+const blank = () => Object.fromEntries(KEYS.map((k) => [k, 0]));
+
+function head(first) {
+  return h("tr", null, h("th", null, first),
+    h("th", { class: "num", title: "Tokens in this row: pump.fun launches with a complete outcome" }, "Tokens (n)"),
+    h("th", { class: "num", title: "Share that left the bonding curve" }, "Graduated"),
+    h("th", { class: "num", title: "Peak: runner or moonshot" }, "Runner or better"),
+    h("th", { class: "num", title: "Peak: moonshot" }, "Moonshot"),
+    h("th", { class: "num", title: "Peak: flat" }, "Flat"),
+    h("th", { class: "num", title: "Fate: rugged" }, "Rugged"),
+    h("th", { class: "num", title: "Fate: dead at day 7" }, "Dead"),
+    h("th", { class: "num", title: "Fate: alive at day 7" }, "Alive"));
+}
+function row(name, g, minN, cls) {
+  const small = g.n < minN;
+  const rate = (k, extra = 0) => num(fmtRate(g[k] + extra, g.n), `${fmtInt(g[k] + extra)} of ${fmtInt(g.n)}`);
+  return h("tr", { class: cls || (small ? "small" : null), title: small && !cls ? `Fewer than ${fmtInt(minN)} tokens: too few to compare` : null },
+    h("td", null, name, small && !cls && g.n > 0 ? h("span", { class: "muted" }, "  (too few)") : null),
+    num(fmtInt(g.n)), rate("graduated"), rate("runner", g.moonshot), rate("moonshot"), rate("flat"), rate("rugged"), rate("dead"), rate("alive"));
+}
+
+function render(d) {
+  const minN = d.settings.min_group_n, need = d.settings.min_complete, L = d.thresholds;
+  const all = d.themes.reduce((a, g) => add(a, g), blank());
+  const total = row("All launches", all, 0, "total");
+
+  const notReady = d.complete < need;
+  $("banner").hidden = !notReady;
+  if (notReady) {
+    $("banner").replaceChildren(
+      h("h2", null, "Not enough complete outcomes yet"),
+      h("div", null, `${fmtInt(d.complete)} of the ${fmtInt(need)} complete outcomes needed. An outcome is complete about 7 days and 6 hours after a token launches, so nothing recorded so far can be complete before ${fmtDate(d.first_launch_at == null ? null : d.first_launch_at + 7.25 * 86400)}. The tables below fill in by themselves as outcomes complete.`),
+      h("ul", null,
+        h("li", null, `Themes: ready about ${fmtDate(d.ready.themes_at)} (when the first ${fmtInt(d.ready.launches_needed)} launches are a week old).`),
+        h("li", null, `Launch hour: ready about ${fmtDate(d.ready.hours_at)} (a full day of launches a week old). One day only: hours will be confounded with whatever happened that day until more days are in.`),
+        h("li", null, `Launch day: ready about ${fmtDate(d.ready.weekdays_at)} (every weekday seen once). One of each weekday is still a thin comparison; treat it as a first look.`)));
+  }
+
+  $("theme-head").replaceChildren(head("Theme"));
+  $("theme-body").replaceChildren(...d.themes.map((g) => row(THEME_NAMES[g.theme] || g.theme, g, minN)), total);
+  $("theme-sub").textContent = `${fmtInt(d.complete)} pump.fun launches with a complete outcome`;
+  $("theme-note").textContent = `Only pump.fun launches we saw being created are counted, and only those whose outcome is complete (every figure present, 7 days after launch). ${fmtInt(d.final)} launches are past day 7; those missing a figure, for example because we never saw a price or the collector was off at a checkpoint, are left out. Each percentage is a share of the row's tokens; hover for the count. Rows with fewer than ${fmtInt(minN)} tokens are greyed out. Runner is a peak of ${L.runner_multiple}× to ${L.moonshot_multiple}× in the first 24 hours, moonshot is ${L.moonshot_multiple}× or more.`;
+
+  // Launch times arrive per hour of the week in UTC; fold them into this browser's time zone.
+  const offset = Math.round(-new Date().getTimezoneOffset() / 60);
+  const hours = Array.from({ length: 24 }, blank), days = Array.from({ length: 7 }, blank);
+  d.hours_utc.forEach((g, utc) => {
+    const local = ((utc + offset) % 168 + 168) % 168;
+    add(hours[local % 24], g); add(days[Math.floor(local / 24)], g);
+  });
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+  const hourName = (i) => `${String(i).padStart(2, "0")}:00 to ${String((i + 1) % 24).padStart(2, "0")}:00`;
+  $("hour-head").replaceChildren(head("Launched"));
+  $("hour-body").replaceChildren(...hours.map((g, i) => row(hourName(i), g, minN)), row("All launches", all, 0, "total"));
+  $("hour-sub").textContent = `your time zone (${zone})`;
+  $("hour-note").textContent = d.now < d.ready.hours_at ? `Not ready until about ${fmtDate(d.ready.hours_at)}.` : "Hours are only comparable once several different days have contributed to each one.";
+  $("day-head").replaceChildren(head("Launched"));
+  $("day-body").replaceChildren(...days.map((g, i) => row(DAYS[i], g, minN)), row("All launches", all, 0, "total"));
+  $("day-sub").textContent = `your time zone (${zone})`;
+  $("day-note").textContent = d.now < d.ready.weekdays_at ? `Not ready until about ${fmtDate(d.ready.weekdays_at)}.` : "With only one or two of each weekday, a difference between days may just be a difference between those particular dates.";
+
+  const tagged = d.tagged, tokens = Object.values(tagged).reduce((a, b) => a + b, 0);
+  const order = [...d.themes.map((g) => g.theme), ...Object.keys(tagged).filter((k) => !d.themes.some((g) => g.theme === k))];
+  $("tagged").replaceChildren(...order.map((key) => {
+    const count = tagged[key] || 0, pct = tokens ? 100 * count / tokens : 0;
+    return h("tr", null,
+      h("td", { class: "what", style: "width:140px;min-width:120px" }, key === "untagged" ? "Not tagged yet (restart needed)" : THEME_NAMES[key] || key),
+      h("td", { class: "barcell" }, count ? h("div", { class: "bar", style: `width:${Math.max(0.3, pct)}%` }) : null),
+      num(fmtInt(count)), num(fmtRate(count, tokens)),
+      h("td", { class: "samples" }, (d.samples[key] || []).join("  ·  ")));
+  }));
+  $("tagged-note").textContent = `Tags come from keyword lists in config/themes.yaml, matched against the token's name and description. Themes are tried in the order shown and the first match wins. Only ${fmtInt(d.with_description)} of ${fmtInt(tokens)} tokens have a description so far, so in practice the name decides. Keyword matching is rough: check the examples, edit the lists, and every token is re-tagged on the next start.`;
+  $("stats").textContent = `counts refresh every ${Math.round(d.settings.cache_s / 60)} minutes`;
+}
+async function load() {
+  try {
+    const res = await fetch("/api/patterns");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    render(await res.json());
+    $("conn").replaceChildren(h("span", { class: "mark ok" }, MARKS.ok), h("span", null, "up to date"));
+  } catch (err) {
+    $("conn").replaceChildren(h("span", { class: "mark crit" }, MARKS.crit), h("span", null, "could not load (restart the app if it was started before this page existed)"));
+  }
+}
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>
