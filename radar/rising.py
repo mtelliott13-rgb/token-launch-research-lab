@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from radar.context import Ctx
+from radar.lab import why
 from radar.view import view_row
 
 _counts_cache: tuple[float, dict[str, int]] = (0.0, {})
@@ -14,6 +15,19 @@ _counts_cache: tuple[float, dict[str, int]] = (0.0, {})
 def rising_rows(ctx: Ctx, now: float) -> list[dict[str, Any]]:
     cfg = ctx.cfg["rising"]
     return ctx.store.rising(min_snapshot_ts=now - cfg["max_snapshot_age_s"], limit=cfg["limit"])
+
+
+def rising_view(ctx: Ctx, rows: list[dict[str, Any]], now: float, *, record: bool = False) -> list[dict[str, Any]]:
+    """Rising rows for the dashboard, each with its one-line "why it's rising"."""
+    analyses, _ = why.for_rising(ctx, rows, now)
+    if record:
+        with ctx.store.tx():
+            why.record_entries(ctx, rows, analyses, now)
+    out = []
+    for row in rows:
+        a = analyses[row["mint"]]
+        out.append({**view_row(row, now), "why": a["summary"], "why_warnings": a["warning_count"]})
+    return out
 
 
 def status_payload(ctx: Ctx, now: float) -> dict[str, Any]:
@@ -40,6 +54,6 @@ async def run(ctx: Ctx) -> None:
         for row in rows[: safety_cfg["rising_top_n"]]:
             if ctx.safety and now - (row["safety_ts"] or 0) > safety_cfg["recheck_s"]:
                 ctx.safety.request(row["mint"], priority=1)
-        ctx.bus.publish("rising", [view_row(r, now) for r in rows])
+        ctx.bus.publish("rising", rising_view(ctx, rows, now, record=True))
         ctx.bus.publish("status", status_payload(ctx, now))
         await asyncio.sleep(cfg["refresh_s"])

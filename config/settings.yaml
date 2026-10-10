@@ -38,7 +38,7 @@ sources:
     per_min: 12
     cache_s: 900                # reuse a report for this long
     recheck_s: 1800             # re-check tokens that stay on the Rising list
-    rising_top_n: 25            # how many Rising tokens get a safety check
+    rising_top_n: 50            # how many Rising tokens get a safety check (the whole list)
     max_queue: 200
     no_report_retry_s: [600, 3600]  # RugCheck has no report: ask again after 10 min, then 1 hour, then stop
     error_retry_s: 120          # RugCheck unreachable: leave that token alone for this long
@@ -68,6 +68,38 @@ outcomes:
   dead_vol_h24_usd: 1000        # "dead": 24h volume under this at day 7
   runner_multiple: 3            # "runner": peak in the first 24h is 3x to 10x p0
   moonshot_multiple: 10         # "moonshot": 10x or more
+
+# "Why it's rising": what stands out about each token on the Rising list, from data we collect.
+why:
+  cache_s: 30                   # reuse a token's analysis for this long
+  lookback_s: 3600              # liquidity change is measured over this long
+  min_cohort: 10                # need this many Rising tokens before saying how unusual a figure is
+  top_drivers: 3                # how many drivers the explanation names
+  # A driver counts once its figure reaches `notable`; at `strong` it is as strong as it gets.
+  drivers:
+    volume_acceleration: {notable: 1.5, strong: 4}      # 5m volume vs the hourly pace (1 = steady)
+    txn_growth: {notable: 1.5, strong: 4}               # 5m trades vs the hourly pace
+    buy_pressure_m5: {notable: 0.6, strong: 0.85}       # share of 5m trades that were buys
+    buy_pressure_h1: {notable: 0.55, strong: 0.75}      # share of 1h trades that were buys
+    price_change_m5: {notable: 5, strong: 30}           # percent
+    price_change_h1: {notable: 20, strong: 150}         # percent
+    mcap_multiple: {notable: 2, strong: 10}             # price now vs the first price we saw
+    holder_growth: {notable: 20, strong: 200}           # percent, since our first safety check
+    liquidity_change: {notable: 15, strong: 100}        # percent, over lookback_s
+  recent_graduation_min: 60     # "just graduated" for this long after leaving the bonding curve
+  warnings:
+    top10_pct: 30               # top-10 holders own at least this share of supply
+    top10_pct_high: 50
+    creator_pct: 5              # the creator's wallet still holds at least this share
+    liquidity_drop_pct: 20      # pool liquidity fell this much over lookback_s
+    mcap_to_liquidity: 100      # market cap is this many times the pool liquidity
+  # Base rates: how tokens that first appeared on Rising with the same pattern ended.
+  base_rates:
+    min_n: 100                  # complete outcomes needed before a pattern's history is shown
+    refresh_s: 900
+    hold_peak: 1.5              # median peak after appearing >= this: "usually had further to run"
+    fade_peak: 1.2              # median peak after appearing < this: "usually near its top"
+  entry_settle_s: 300           # a new Rising entry may still gain its safety check for this long
 
 # Patterns page: themes and launch times compared by graduation rate, peak and fate.
 # Only pump.fun launches we saw being created, with a complete outcome, are counted.

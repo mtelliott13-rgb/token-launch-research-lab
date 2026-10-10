@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-10-09, Phase 2 built, with peak/fate verdicts, data retention, theme tags and the Patterns page.
+Last updated: 2026-10-09, Phase 2 built, with peak/fate verdicts, data retention, theme tags, the Patterns page and "Why it's rising".
 
 ## Start the dashboard
 
@@ -33,7 +33,7 @@ the Rising list is ranked, and token details work.
   token drawer (chart, market figures, safety report, links, Watch), Social placeholder,
   collector health chips.
 - Momentum score v0, weights in `config/settings.yaml`.
-- 85 tests passing (`uv run pytest`), including Phase 2.
+- 96 tests passing (`uv run pytest`), including Phase 2.
 - Structured logs in `data/logs/radar.log`.
 
 ## Fixed after the first 20-hour run (2026-10-09)
@@ -151,6 +151,29 @@ sells and price change, so a pruned token still has its signal inputs at 1m, 5m,
   Settings under `patterns:`.
 - "Complete" leaves out launches that are missing a figure (never priced, or a checkpoint was
   skipped while the collector was off). If those differ from the rest, the page is biased.
+
+## "Why it's rising" (added 2026-10-09)
+
+- Every token on Rising gets a one-line reason in the table and a full panel in the drawer:
+  drivers with their numbers and how unusual each is among the tokens on Rising now, warning
+  signs, a three-sentence explanation, base rates and takeaways. Code: `radar/lab/why.py`;
+  thresholds under `why:` in `config/settings.yaml`. Free data only, all from our own tables.
+- The explanation always ends by saying we cannot see X posts, Telegram calls or individual
+  trades. Takeaways for a launch are only drawn from holder breadth, links being in place,
+  graduation timing and paid promotion; warning signs are listed under "Not to copy".
+- Base rates need history that starts with this version. The first time a token appears on
+  Rising, its price and pattern (stage / two strongest driver families / warnings) are saved in
+  `rising_entries`. Once its outcome is complete, it counts toward that pattern. A pattern is
+  shown at 100 complete outcomes; before that the panel falls back to the wider group, or says
+  "not enough history yet". Nothing can be complete before about 2026-10-17.
+- "Median peak" in the base rates is measured from the price when the token first appeared on
+  Rising, over the next 24 hours, not from p0.
+- "How unusual" compares with the up to 50 tokens on Rising at that moment, not with history.
+- Holder growth needs two safety reports, about 30 minutes apart, so it is usually blank when a
+  token first appears. All 50 Rising tokens now get safety checks (was the top 25).
+- Noticed while testing, not fixed: for some tokens RugCheck's risk list says "Mint Authority
+  still enabled" while our own reading of the same report says revoked. Worth checking which
+  field is right before relying on the "Authorities revoked" badge.
 
 ## Open decisions
 

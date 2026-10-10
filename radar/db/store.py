@@ -265,6 +265,41 @@ class Store:
         row = self.db.execute("SELECT * FROM outcomes WHERE mint = ?", (mint,)).fetchone()
         return dict(row) if row else None
 
+    # ---- "why it's rising" ----------------------------------------------------
+
+    def liquidity_before(self, mint: str, ts: float) -> float | None:
+        """Pool liquidity in the latest DexScreener snapshot at or before `ts`."""
+        row = self.db.execute(
+            "SELECT liquidity_usd FROM snapshots WHERE mint = ? AND ts <= ? AND source = 'dexscreener' "
+            "AND liquidity_usd IS NOT NULL ORDER BY ts DESC LIMIT 1",
+            (mint, ts),
+        ).fetchone()
+        return row[0] if row else None
+
+    def first_holder_count(self, mint: str) -> tuple[float, int] | None:
+        """(time, holders) from the earliest safety report that has a holder count."""
+        row = self.db.execute(
+            "SELECT ts, total_holders FROM safety WHERE mint = ? AND total_holders > 0 ORDER BY ts LIMIT 1", (mint,)
+        ).fetchone()
+        return (row[0], row[1]) if row else None
+
+    def add_rising_entry(self, mint: str, entry: dict[str, Any]) -> bool:
+        """Record a token's first appearance on Rising. Returns False if it already had one."""
+        cols = ["mint", *entry]
+        cur = self.db.execute(
+            f"INSERT OR IGNORE INTO rising_entries ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            (mint, *entry.values()),
+        )
+        return cur.rowcount > 0
+
+    def update_rising_entry(self, mint: str, **fields: Any) -> None:
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(f"UPDATE rising_entries SET {sets} WHERE mint = ?", (*fields.values(), mint))
+
+    def rising_entry(self, mint: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM rising_entries WHERE mint = ?", (mint,)).fetchone()
+        return dict(row) if row else None
+
     # ---- retention ----------------------------------------------------------
 
     def retention_candidates(self, first_seen_before: float, limit: int) -> list[dict[str, Any]]:

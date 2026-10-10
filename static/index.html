@@ -75,6 +75,19 @@
   .score { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 6px; min-width: 74px; }
   #rising-table th, #rising-table td { padding-left: 7px; padding-right: 7px; }
   .tok .badges { margin-top: 3px; }
+  .tok .why { margin-top: 3px; color: var(--ink2); font-size: 11.5px; white-space: normal; }
+  .why-text { margin: 0 0 10px; }
+  .why-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  .why-table th, .why-table td { position: static; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; background: none; }
+  .why-table td.num, .why-table th.num { text-align: right; padding-right: 12px; white-space: nowrap; }
+  .why-table th:first-child { width: 44%; }
+  .why-table tr.quiet td { color: var(--muted); }
+  .why-table tr { cursor: default; }
+  .why-table tbody tr:hover { background: none; }
+  .why-h { margin: 12px 0 6px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+  .why-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+  .why-warn { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+  .why-warn li { display: flex; gap: 8px; align-items: baseline; }
   .bar { height: 4px; background: var(--line); border-radius: 2px; }
   .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 
@@ -189,6 +202,7 @@
   </div>
   <div class="block"><h4>Market</h4><div class="grid" id="d-stats"></div>
     <div class="note" id="d-watch-note"></div></div>
+  <div class="block"><h4>Why it's rising</h4><div id="d-why" class="muted">Loading…</div></div>
   <div class="block"><h4>Safety report (RugCheck)</h4><div id="d-safety" class="muted">Loading…</div></div>
   <div class="block"><h4>Links</h4><div class="linkrow" id="d-links"></div>
     <div class="note">Twitter, Telegram and website links are set by the token's creator and are not verified.</div></div>
@@ -292,7 +306,9 @@ function tokenCell(r, withImage, withFlags) {
     h("div", { class: "names" },
       h("div", { class: "sym" }, r.symbol || "?"),
       h("div", { class: "name" }, r.name || ""),
-      withFlags && flags(r)));
+      withFlags && flags(r),
+      withFlags && r.why && h("div", { class: "why", title: "Why it's rising: the strongest drivers in our data. Open the token for the full analysis." },
+        r.why, r.why_warnings ? h("span", { class: "muted" }, `  ·  ${r.why_warnings} warning${r.why_warnings === 1 ? "" : "s"}`) : null)));
 }
 function rowEl(r, cells) {
   return h("tr", { "data-mint": r.mint, tabindex: "0" }, cells);
@@ -324,7 +340,8 @@ function ingest(rows) {
   for (const r of rows) {
     if (r.created_at != null && passes(r)) state.launches.set(r.mint, r); else state.launches.delete(r.mint);
     const i = state.rising.findIndex((x) => x.mint === r.mint);
-    if (i >= 0) { state.rising[i] = r; state.dirty.rising = true; }
+    // Single-token updates carry no "why" line; keep the one from the last Rising push.
+    if (i >= 0) { state.rising[i] = { ...r, why: state.rising[i].why, why_warnings: state.rising[i].why_warnings }; state.dirty.rising = true; }
     if (r.watched) state.watching.set(r.mint, r); else if (state.watching.delete(r.mint)) state.dirty.watch = true;
     if (r.watched) state.dirty.watch = true;
     if (state.drawer && state.drawer.mint === r.mint) renderDrawerToken(r);
@@ -475,6 +492,49 @@ function renderSafety(s, note) {
           h("span", { class: "desc" }, r.description))))
       : h("div", { class: "note" }, "RugCheck lists no specific risks."));
 }
+function renderWhy(a) {
+  const box = $("d-why");
+  if (!a) { box.className = "muted"; box.textContent = "The analysis could not be loaded (restart the app if it was started before this panel existed)."; return; }
+  box.className = "";
+  const top = new Set(a.top);
+  const driverRow = (d) => h("tr", { class: d.notable ? null : "quiet" },
+    h("td", null, d.label, d.paid ? badge("warn", "Paid") : null, top.has(d.key) ? h("span", { class: "muted" }, "  ◀ named above") : null),
+    h("td", { class: "num" }, d.display == null ? DASH : d.display),
+    h("td", null, d.unusual));
+  const contextRow = (c) => {
+    let value = c.display, note = c.unusual || "";
+    if (c.minutes !== undefined) value = c.minutes == null ? DASH : fmtAge(c.minutes * 60);
+    if (c.created_at !== undefined) {
+      value = c.created_at == null ? DASH : new Date(c.created_at * 1000).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
+      note = "your local time";
+    }
+    return h("tr", { class: "quiet" }, h("td", null, c.label), h("td", { class: "num" }, value), h("td", null, note));
+  };
+  const b = a.base_rates;
+  const rates = b.ready
+    ? h("div", null,
+        h("div", { class: "grid" },
+          kv("Alive at day 7", b.alive_pct.toFixed(0) + "%"), kv("Rugged", b.rugged_pct.toFixed(0) + "%"),
+          kv("Median peak in the next 24h", b.median_peak == null ? DASH : b.median_peak.toFixed(2) + "× the price when it appeared")),
+        h("div", { class: "note" }, `Based on ${fmtInt(b.n)} ${b.who} whose outcomes are complete.` +
+          (b.level === "pattern" ? "" : ` Only ${fmtInt(b.pattern_n)} had this exact pattern, so this is the wider group.`)))
+    : h("div", { class: "note", style: "margin-top:0" }, b.text);
+  box.replaceChildren(
+    h("p", { class: "why-text" }, a.explanation),
+    h("div", { class: "why-h" }, "Drivers"),
+    h("table", { class: "why-table" },
+      h("thead", null, h("tr", null, h("th", null, "Figure"), h("th", { class: "num" }, "Now"), h("th", null, "Compared with other Rising tokens"))),
+      h("tbody", null, a.drivers.map(driverRow), a.context.map(contextRow))),
+    h("div", { class: "why-h" }, "Warning signs"),
+    a.warnings.length
+      ? h("ul", { class: "why-warn" }, a.warnings.map((w) => h("li", null, badge(w.level === "high" ? "crit" : "warn", w.level === "high" ? "High" : "Note"), h("span", null, w.text))))
+      : h("div", { class: "note", style: "margin-top:0" }, a.checked ? "None in the data we have." : "None so far, but there is no safety report yet, so holder and insider risks are unknown."),
+    h("div", { class: "why-h" }, "How similar tokens ended"),
+    h("div", { class: "note", style: "margin:0 0 6px" }, "Pattern: " + a.pattern_label + "."),
+    rates,
+    h("div", { class: "why-h" }, "Takeaways"),
+    h("ul", { class: "why-list" }, a.takeaways.map((t) => h("li", null, t))));
+}
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 async function loadChart(mint) {
   const d = state.drawer; if (!d || d.mint !== mint) return;
@@ -510,6 +570,7 @@ async function openDrawer(mint) {
   $("drawer").setAttribute("aria-hidden", "false");
   $("d-title").textContent = "Loading…"; $("d-mint").textContent = mint;
   $("d-safety").className = "muted"; $("d-safety").textContent = "Fetching safety report…";
+  $("d-why").className = "muted"; $("d-why").textContent = "Working out what stands out…";
   $("chart-note").textContent = "Loading chart…";
   try {
     const info = await api(`/api/token/${mint}`);
@@ -519,9 +580,12 @@ async function openDrawer(mint) {
   } catch { $("d-title").textContent = "Could not load this token"; return; }
   loadChart(mint);
   d.timer = setInterval(() => loadChart(mint), 46000);
+  const loadWhy = () => api(`/api/token/${mint}/why`).then((a) => { if (state.drawer === d) renderWhy(a); })
+    .catch(() => { if (state.drawer === d) renderWhy(null); });
+  loadWhy();
   try {
     const res = await api(`/api/token/${mint}/safety`);
-    if (state.drawer === d) renderSafety(res.safety, res.note);
+    if (state.drawer === d) { renderSafety(res.safety, res.note); loadWhy(); }  // warnings depend on the safety report
   } catch { if (state.drawer === d) renderSafety(null, "Could not load the safety report."); }
 }
 function closeDrawer() {

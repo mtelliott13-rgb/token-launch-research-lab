@@ -229,6 +229,26 @@ CREATE TABLE IF NOT EXISTS outcomes (
     computed_at                 REAL
 );
 
+-- The first time each token appeared on the Rising list: what it looked like and which
+-- driver pattern it showed. Joined with outcomes to say how similar tokens ended.
+CREATE TABLE IF NOT EXISTS rising_entries (
+    mint                        TEXT PRIMARY KEY,
+    ts                          REAL NOT NULL,
+    score                       REAL,
+    price_usd                   REAL,
+    mcap                        REAL,
+    liquidity_usd               REAL,
+    stage                       TEXT,      -- curve / just_graduated / graduated
+    pattern                     TEXT,      -- stage/driver families/warnings, e.g. "curve/buying+volume/clean"
+    checked                     INTEGER,   -- 1 = it had a safety report when the pattern was set
+    paid_boost                  INTEGER,
+    theme                       TEXT,
+    drivers_json                TEXT,
+    warnings_json               TEXT,
+    peak_multiple_24h_after     REAL       -- highest price in the 24h after ts, as a multiple of price_usd
+);
+CREATE INDEX IF NOT EXISTS idx_rising_entries_pattern ON rising_entries(pattern);
+
 CREATE TABLE IF NOT EXISTS meta (
     key             TEXT PRIMARY KEY,
     value           TEXT

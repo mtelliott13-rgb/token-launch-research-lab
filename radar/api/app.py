@@ -24,7 +24,7 @@ from radar.db.store import Store
 from radar.events import EventBus
 from radar.health import Health
 from radar.http import SourceClient, SourceError
-from radar.lab import backfill, retention, stats
+from radar.lab import backfill, retention, stats, why
 from radar.lab.followups import step_in_delay
 from radar.scoring.themes import Tagger
 from radar.view import is_mint, view_row
@@ -96,6 +96,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             "rugcheck:queue": ctx.safety.run,
             "followups": followup.run,
             "retention": retention.run,
+            "why:base_rates": why.base_rates_loop,
             "rising": rising.run,
         }
         tasks = [asyncio.create_task(supervise(name, ctx, fn), name=name) for name, fn in collectors.items()]
@@ -197,8 +198,8 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
 
     @app.get("/api/rising")
     async def rising_list(request: Request) -> list[dict[str, Any]]:
-        now = time.time()
-        return [view_row(r, now) for r in rising.rising_rows(ctx_of(request), now)]
+        ctx, now = ctx_of(request), time.time()
+        return rising.rising_view(ctx, rising.rising_rows(ctx, now), now)
 
     @app.get("/api/watching")
     async def watching(request: Request) -> list[dict[str, Any]]:
@@ -237,6 +238,12 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             log.exception("could not process the safety report for %s", mint)
             return {"safety": safety_view(ctx.store.latest_safety(mint)), "note": "RugCheck returned a report we could not read."}
         return {"safety": safety_view(report), "note": None}
+
+    @app.get("/api/token/{mint}/why")
+    async def token_why(request: Request, mint: str) -> dict[str, Any]:
+        """What stands out about this token compared with the tokens on Rising right now."""
+        ctx, now = ctx_of(request), time.time()
+        return why.for_token(ctx, token_row(ctx, mint), rising.rising_rows(ctx, now), now)
 
     @app.get("/api/token/{mint}/ohlcv")
     async def token_ohlcv(request: Request, mint: str) -> dict[str, Any]:

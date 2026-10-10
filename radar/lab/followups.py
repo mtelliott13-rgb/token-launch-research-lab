@@ -79,11 +79,24 @@ def update_outcome(ctx: Ctx, row: Mapping[str, Any], now: float) -> None:
     """Recompute a token's outcome from its snapshots. Never call this for a token whose
     snapshots were cut back (token_state.retention is 'pruned' or 'early'): the price history is gone."""
     store, mint = ctx.store, row["mint"]
+    points = store.price_points(mint)
+    if row.get("rising_seen_at") is not None:
+        _fill_peak_after_rising(store, mint, points, now)
     outcome = compute_outcome(
-        store.price_points(mint),
+        points,
         store.followups_for(mint),
         rugcheck_rugged=bool(row.get("rugged")),
         cfg=ctx.cfg["outcomes"],
         now=now,
     )
     store.upsert_outcome(mint, outcome)
+
+
+def _fill_peak_after_rising(store: Any, mint: str, points: list[tuple], now: float) -> None:
+    """Once 24 hours have passed since a token first appeared on Rising, record how high it went after."""
+    entry = store.rising_entry(mint)
+    if not entry or entry["peak_multiple_24h_after"] is not None or not entry["price_usd"] or now < entry["ts"] + 86400:
+        return
+    after = [price for ts, price, _ in points if entry["ts"] < ts <= entry["ts"] + 86400]
+    peak = max([entry["price_usd"], *after])
+    store.update_rising_entry(mint, peak_multiple_24h_after=round(peak / entry["price_usd"], 4))
