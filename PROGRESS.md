@@ -199,8 +199,12 @@ Oct 9.
 - **History so far** (found from gaps in the recorded launches): 8 outages totalling 3h 15m, 8%
   of the 40.5 hours collected, about 5,100 launches missed. Two were the app being stopped
   (39 minutes on Oct 8, 64 minutes on Oct 9). The other six, mid-morning on Oct 9 and Oct 10,
-  happened while the app was running; no collector logged anything for up to 15 minutes at a
-  time, which is what a sleeping computer looks like. Not confirmed.
+  happened while the app was running: the Mac went to sleep.
+- **Cause of the morning outages, confirmed by the user on 2026-10-10:** the Mac was unplugged
+  to charge a phone, and on battery it slept. It will be kept plugged in from now on. No
+  reconnect setting can help while the computer is asleep, because the whole app is frozen.
+  If "Missed periods" shows new outages with the reason "no launches arrived (stalled stream,
+  or the computer was asleep)", check the power cable first.
 
 ## Outside requests, per day
 
@@ -252,10 +256,6 @@ All free, no keys.
 
 9. **Extend the on-chain check?** It covers Rising only. Tokens that never reach Rising still
    show RugCheck's reading, which was wrong for about 1.5% of checked tokens.
-
-10. **Keep the computer awake?** Six of the eight outages so far look like the Mac sleeping in
-    the morning (see "PumpPortal outages"). If so, no reconnect setting helps; the fix is in the
-    Mac's sleep settings or in how the collector is started.
 
 Defaults chosen during the build, all changeable in `config/settings.yaml`: Rising cap of $50M;
 bot-volume flag at 300 trades and 1%; retention thresholds of $30,000 and $10,000; 5,000 complete
