@@ -17,8 +17,8 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`).
 
-**A restart is pending** for the outage tracking built on 2026-10-10. Everything else below
-has been live since the restart on 2026-10-09 at 22:38.
+**A restart is pending** for the stall watchdog built on 2026-10-11. Everything else below,
+including outage tracking, has been live since the restart on 2026-10-10 at 11:18.
 
 ## What exists
 
@@ -35,7 +35,7 @@ has been live since the restart on 2026-10-09 at 22:38.
 | Description fetch | 2026-10-09 | `radar/collectors/metadata.py` |
 | Mint and freeze authority fix | 2026-10-09 | `radar/collectors/rugcheck.py` |
 | Routine on-chain authority check | 2026-10-09 | `radar/collectors/solana_rpc.py` |
-| PumpPortal outage tracking (needs the restart) | 2026-10-10 | `radar/lab/outages.py` |
+| PumpPortal outage tracking | 2026-10-10 | `radar/lab/outages.py` |
 
 123 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
 trades, signs or holds keys.
@@ -206,6 +206,24 @@ Oct 9.
   If "Missed periods" shows new outages with the reason "no launches arrived (stalled stream,
   or the computer was asleep)", check the power cable first.
 
+### Stall watchdog and the afternoon of 2026-10-11
+
+- **Watchdog (needs the restart):** connected but no token creations for 60 seconds
+  (`stall_after_s`) closes the connection and reconnects at once, with no backoff wait. The old
+  rule only reconnected after 120 seconds with no messages of any kind.
+- **Sleep is now named.** The app compares the wall clock with a clock that stops during sleep.
+  If they drift 30 seconds or more (`sleep_min_s`), the outage reason is "the computer was
+  asleep (about N)" instead of a connection error.
+- **2026-10-11:** 13 outages, 3h 1m lost, all but one minute of it between 15:11 and 18:40,
+  about 3,000 launches. DexScreener went silent in exactly the same periods (15-minute blocks
+  with a few seconds of activity between them), and neither the 20-second ping check nor the
+  120-second silence timer fired. So the whole app was frozen: the Mac was asleep and waking
+  briefly about every 15 minutes. `caffeinate -i` stops idle sleep only; closing the lid still
+  sleeps the Mac. The watchdog cannot help with this. To confirm, run
+  `pmset -g log | grep -E "Sleep|Wake" | tail -40`.
+- **One copy only:** checked 2026-10-11 18:45, one collector process, one PumpPortal connection.
+- **Backup launch sources (researched, not built):** see open decision 10.
+
 ## Outside requests, per day
 
 All free, no keys.
@@ -261,6 +279,14 @@ Defaults chosen during the build, all changeable in `config/settings.yaml`: Risi
 bot-volume flag at 300 trades and 1%; retention thresholds of $30,000 and $10,000; 5,000 complete
 outcomes and 300 per row on Patterns; 100 complete outcomes for a base rate; description fetch at
 $10,000.
+
+10. **Backup source for launches when PumpPortal stalls?** Options found 2026-10-11:
+    the public Solana RPC websocket (`logsSubscribe` on the pump.fun program; free, no key,
+    tested working, but about 0.6 MB a second, so only as a standby); Helius free key (same
+    feed, 1M credits a month, which is roughly one day of that stream, so standby only);
+    Moralis "new pump.fun tokens" list (free key, could fill gaps after an outage, quota not
+    confirmed); Bitquery (free tier too small); pumpdev.io (claimed free, did not answer our
+    test). Nothing built yet.
 
 ## Known limits
 
