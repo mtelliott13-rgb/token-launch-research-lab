@@ -16,7 +16,11 @@ sources:
     url: wss://pumpportal.fun/api/data
     reconnect_min_s: 1
     reconnect_max_s: 30         # longest wait between reconnect attempts; it never stops trying
-    stale_after_s: 120          # reconnect if nothing arrives for this long
+    # Stall watchdog: connected but no token creations for this long -> close and reconnect at once.
+    stall_after_s: 60
+    # If the clock jumped at least this far while the app was frozen, the outage is recorded
+    # as "the computer was asleep" instead of a connection fault.
+    sleep_min_s: 30
     # A period with no launches arriving is saved as an outage when the connection dropped, or
     # when the silence lasted at least this long (launches normally arrive every second or two).
     outage_min_gap_s: 60

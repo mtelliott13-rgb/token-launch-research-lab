@@ -1,12 +1,18 @@
 """PumpPortal outages: recorded, logged with their length, and tokens launched in one are missing data."""
+import asyncio
+import json
 import logging
+import time
 
+import websockets
+
+from radar.collectors import pumpportal
 from radar.config import load_settings
 from radar.db.store import Store
 from radar.lab import followups, outages, stats
 from radar.lab.outages import OutageTracker, launch_unseen
 from radar.lab.outcomes import compute_outcome
-from tests.test_ingest import run
+from tests.test_ingest import CREATE, run
 
 CFG = load_settings()
 T0 = 1_000_000.0
@@ -120,3 +126,82 @@ def test_earlier_outages_are_found_once_from_gaps_in_stored_launches():
     s.add_raw_event(T0 + 1000, "dexscreener", "profile", "M", {})       # other sources do not fill the gap
     assert outages.backfill(s, CFG, T0 + 5000) == 1 and outages.backfill(s, CFG, T0 + 6000) is None
     assert s.outages("pumpportal") == [(T0 + 45, T0 + 2400)]
+
+
+class Clocks:
+    """A wall clock and a monotonic clock we can move by hand; sleeping moves only the wall clock."""
+
+    def __init__(self):
+        self.wall_now, self.mono_now = T0, 500.0
+
+    def awake(self, seconds):
+        self.wall_now += seconds
+        self.mono_now += seconds
+
+    def asleep(self, seconds):
+        self.wall_now += seconds
+
+    def watchdog(self):
+        return pumpportal.Watchdog(60, 30, wall=lambda: self.wall_now, mono=lambda: self.mono_now)
+
+
+def test_watchdog_allows_60_quiet_seconds_and_each_launch_starts_them_again():
+    assert CFG["sources"]["pumpportal"]["stall_after_s"] == 60
+    clocks = Clocks()
+    dog = clocks.watchdog()
+    clocks.awake(59)
+    assert dog.wait_s() == 1
+    dog.launch_seen()
+    clocks.awake(59)
+    assert dog.wait_s() == 1
+    clocks.awake(1)
+    assert dog.wait_s() <= 0
+    assert dog.reason(pumpportal.Stalled()) == "connected but no launches for 60s (stalled stream)"
+    assert dog.reason(ConnectionError("reset")) == "ConnectionError: reset"
+
+
+def test_watchdog_tells_a_sleeping_computer_from_a_stalled_stream():
+    clocks = Clocks()
+    dog = clocks.watchdog()
+    clocks.awake(5)
+    clocks.asleep(905)                        # the app was frozen, so no timer could have fired
+    assert dog.wait_s() <= 0                  # ...but the watchdog reconnects as soon as it runs again
+    assert dog.reason(ConnectionError("no close frame")) == "the computer was asleep (about 15m 5s)"
+    assert dog.reason(pumpportal.Stalled()) == "the computer was asleep (about 15m 5s)"
+    clocks = Clocks()
+    dog = clocks.watchdog()
+    clocks.asleep(10)                         # a clock adjustment, not a sleep
+    assert dog.slept_s() == 0
+
+
+def test_a_connection_that_goes_silent_is_closed_and_replaced_at_once():
+    """A server that accepts the subscriptions, sends one launch, then says nothing more."""
+    connections = []
+
+    async def silent_server(ws):
+        connections.append(time.time())
+        await ws.recv()
+        await ws.recv()
+        await ws.send(json.dumps({"message": "Successfully subscribed to token creation events."}))
+        if len(connections) == 2:
+            await ws.send(json.dumps(CREATE))
+        await ws.wait_closed()                # stays open, answers pings, sends nothing
+
+    async def flow(ctx):
+        async with websockets.serve(silent_server, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            ctx.cfg["sources"]["pumpportal"] |= {"url": f"ws://127.0.0.1:{port}", "stall_after_s": 0.3, "reconnect_min_s": 5}
+            task = asyncio.create_task(pumpportal.run(ctx))
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if len(connections) >= 3:
+                    break
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    _, ctx, _ = run(lambda request: None, flow)
+    assert len(connections) >= 3
+    # Reconnected about 0.3s apart: no 5-second backoff after a stall.
+    assert connections[2] - connections[0] < 3
+    assert ctx.store.db.execute("SELECT COUNT(*) FROM tokens").fetchone()[0] == 1
+    assert "stalled stream" in ctx.health.snapshot()["pumpportal"]["last_error"]

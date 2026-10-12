@@ -26,7 +26,7 @@ import websockets
 from radar.collectors.common import publish_tokens, to_float
 from radar.context import Ctx
 from radar.faillog import FailureLog
-from radar.lab.outages import OutageTracker
+from radar.lab.outages import OutageTracker, fmt_length
 from radar.view import clean_text, clean_url, is_mint
 
 log = logging.getLogger(__name__)
@@ -107,6 +107,43 @@ def handle_message(ctx: Ctx, raw: str | bytes, counts: dict[str, int]) -> None:
     ctx.health.ok(NAME, connected=True, tokens_seen=counts["create"], migrations_seen=counts["migrate"])
 
 
+class Stalled(Exception):
+    """Connected and subscribed, but no token creations are arriving."""
+
+
+class Watchdog:
+    """Notices a stream that has gone quiet, and tells a stalled stream from a sleeping computer.
+
+    The quiet time is measured on the wall clock. The monotonic clock stops while the computer
+    sleeps, so the difference between the two is how long it slept; timers alone would never
+    notice a sleep, which is why a frozen app used to look like a silent connection.
+    """
+
+    def __init__(self, stall_after_s: float, sleep_min_s: float, wall=time.time, mono=time.monotonic) -> None:
+        self.stall_after_s, self.sleep_min_s = stall_after_s, sleep_min_s
+        self.wall, self.mono = wall, mono
+        self.launch_seen()
+
+    def launch_seen(self) -> None:
+        self.wall_at, self.mono_at = self.wall(), self.mono()
+
+    def wait_s(self) -> float:
+        """Seconds of quiet still allowed; zero or less means the stream has stalled."""
+        return self.stall_after_s - (self.wall() - self.wall_at)
+
+    def slept_s(self) -> float:
+        slept = (self.wall() - self.wall_at) - (self.mono() - self.mono_at)
+        return slept if slept >= self.sleep_min_s else 0.0
+
+    def reason(self, exc: BaseException) -> str:
+        slept = self.slept_s()
+        if slept:
+            return f"the computer was asleep (about {fmt_length(slept)})"
+        if isinstance(exc, Stalled):
+            return f"connected but no launches for {self.stall_after_s:g}s (stalled stream)"
+        return f"{type(exc).__name__}: {exc}"
+
+
 async def run(ctx: Ctx) -> None:
     cfg = ctx.cfg["sources"]["pumpportal"]
     counts = {"create": 0, "migrate": 0}
@@ -115,6 +152,8 @@ async def run(ctx: Ctx) -> None:
     # The gap since the last launch we stored, before this start, is itself an outage.
     outages = OutageTracker(ctx, NAME, ctx.store.last_event_at(NAME), "the app was not running", cfg["outage_min_gap_s"])
     while True:  # never gives up: the wait between attempts grows to reconnect_max_s and stays there
+        watchdog = Watchdog(cfg["stall_after_s"], cfg["sleep_min_s"])
+        stalled = False
         try:
             async with websockets.connect(
                 cfg["url"],
@@ -122,31 +161,47 @@ async def run(ctx: Ctx) -> None:
                 open_timeout=20,
                 ping_interval=20,
                 ping_timeout=20,
+                close_timeout=3,  # a stalled link may never answer the goodbye; do not wait long for it
             ) as ws:
                 await ws.send(json.dumps({"method": "subscribeNewToken"}))
                 await ws.send(json.dumps({"method": "subscribeMigration"}))
                 log.info("pumpportal connected")
+                watchdog.launch_seen()  # the 60 seconds start once we are subscribed
                 failures.ok(NAME)
                 ctx.health.ok(NAME, connected=True, reconnects=reconnects)
                 while True:
-                    # New tokens arrive every couple of seconds; long silence means a dead link.
-                    raw = await asyncio.wait_for(ws.recv(), timeout=cfg["stale_after_s"])
+                    # New tokens arrive every couple of seconds. A connection can stay open and
+                    # answer pings while sending none, so silence is judged on launches alone.
+                    wait = watchdog.wait_s()
+                    if wait <= 0:
+                        raise Stalled
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=wait)
+                    except asyncio.TimeoutError:
+                        continue
                     backoff = cfg["reconnect_min_s"]
-                    seen = counts["create"] + counts["migrate"]
+                    seen, created = counts["create"] + counts["migrate"], counts["create"]
                     try:
                         handle_message(ctx, raw, counts)
                     except Exception:  # noqa: BLE001 - one bad message must not drop the stream
                         log.exception("pumpportal: failed to handle a message")
                     if counts["create"] + counts["migrate"] > seen:
                         outages.event(time.time())  # launches are flowing (again)
+                    if counts["create"] > created:
+                        watchdog.launch_seen()
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - any failure here means "reconnect"
-            reason = "no messages (stale connection)" if isinstance(exc, asyncio.TimeoutError) else f"{type(exc).__name__}: {exc}"
-            failures.failed(NAME, f"pumpportal disconnected ({reason}); reconnecting with backoff")
+            reason = watchdog.reason(exc)
+            # A stall is not a refusal: the next connection is tried at once, and it gets its
+            # own 60 seconds to deliver a launch, so this cannot loop faster than once a minute.
+            stalled = isinstance(exc, Stalled)
+            failures.failed(NAME, f"pumpportal disconnected ({reason}); reconnecting {'now' if stalled else 'with backoff'}")
             ctx.health.error(NAME, reason)
             ctx.health.note(NAME, connected=False)
             outages.disconnected(reason)
         reconnects += 1
+        if stalled:
+            continue
         await asyncio.sleep(backoff + random.uniform(0, 1))
         backoff = min(backoff * 2, cfg["reconnect_max_s"])
