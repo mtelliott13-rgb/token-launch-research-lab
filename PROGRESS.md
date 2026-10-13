@@ -234,11 +234,15 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
 - **Strategies** are files in `strategies/`: `every_graduation.yaml` (first price at least 2
   minutes after graduation), `safety_only.yaml` (mint and freeze revoked on-chain, top-10 under
   30%, no bot-volume flag, within an hour of graduation), `momentum_safety.yaml` (the same plus
-  on the Rising list, within 6 hours). The 1-hour and 6-hour windows were my choice.
+  on the Rising list, within 6 hours).
 - **Exits, the same for all three:** sell half at 2x, then a 30% trailing stop on the rest; hard
   stop at -40%; time stop at 24 hours. 0.5 SOL per trade, one trade per strategy per token.
   The trailing stop only starts after the half is sold ("on the rest"); before that the hard
   stop is the only stop. Change `trailing_after_take_profit` to make it apply from entry.
+- **Confirmed by the user on 2026-10-13:** trailing stop only after the half sells at 2x; safety
+  must pass within 1 hour of graduation; no retry on dropped entries; only tokens graduating
+  after the restart are traded; -10% median in the gate. The 6-hour window for reaching Rising
+  was not mentioned and stays as built.
 - **Pessimism** (`shadow` in `config/settings.yaml`): entry and exit at the next price after
   the signal or stop; PumpSwap's published fee table (1.25% for small tokens down to 0.30%,
   pump.fun/docs/fees dated 2026-10-08) each way; 0.001 SOL priority fee per transaction;
@@ -325,8 +329,6 @@ $10,000.
 11. **Keep the Mac awake.** `caffeinate -i` is not preventing sleep (most likely the lid is
     closed). Options: leave the lid open, or change the system sleep setting (needs your
     say-so, it is a system setting).
-12. **Shadow bot choices to confirm:** trailing stop only after the half is sold; signal
-    windows of 1 hour (safety) and 6 hours (momentum); 10% dropped entries with no retry.
 
 ## Known limits
 
