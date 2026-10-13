@@ -157,3 +157,16 @@ def collect_from(store: Store, cfg: Mapping[str, Any]) -> dict[str, Any]:
         return collect(db, cfg)
     finally:
         db.close()
+
+
+def shadow_from(store: Store, cfg: Mapping[str, Any], specs: Any, now: float) -> dict[str, Any]:
+    """The Shadow Bot page's numbers, read the same way."""
+    from radar.lab import shadow
+
+    if store.path == ":memory:":
+        return shadow.report(store.db, cfg, specs, now)
+    db = _read_only(store)
+    try:
+        return shadow.report(db, cfg, specs, now)
+    finally:
+        db.close()

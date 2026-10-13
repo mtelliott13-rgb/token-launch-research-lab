@@ -24,7 +24,7 @@ from radar.db.store import Store
 from radar.events import EventBus
 from radar.health import Health
 from radar.http import SourceClient, SourceError
-from radar.lab import backfill, outages, retention, stats, why
+from radar.lab import backfill, outages, retention, shadow, stats, why
 from radar.lab.followups import step_in_delay
 from radar.scoring.themes import Tagger
 from radar.view import authorities, is_mint, view_row
@@ -178,6 +178,24 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             cached = (now, result)
             app.state.patterns_cache = cached
         return {**cached[1], "as_of": cached[0], "now": now, "settings": cfg["patterns"], "thresholds": cfg["outcomes"]}
+
+    @app.get("/shadow")
+    async def shadow_page() -> FileResponse:
+        return FileResponse(STATIC / "shadow.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/shadow")
+    async def shadow_report(request: Request) -> dict[str, Any]:
+        """Paper-trading results per strategy. Read on a separate connection, like /api/data."""
+        ctx = ctx_of(request)
+        now = time.time()
+        cached = getattr(app.state, "shadow_cache", None)
+        if cached is None or now - cached[0] > 15:
+            args = (ctx.store, cfg, shadow.strategies(ctx), now)
+            in_memory = ctx.store.path == ":memory:"
+            result = stats.shadow_from(*args) if in_memory else await asyncio.to_thread(stats.shadow_from, *args)
+            cached = (now, result)
+            app.state.shadow_cache = cached
+        return {**cached[1], "live": ctx.shadow_counts, "sol_price_usd": ctx.sol_price_usd}
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:

@@ -37,6 +37,10 @@ def next_refresh_delay(state: Mapping[str, Any], now: float, cfg: Mapping[str, A
     """
     if state.get("watched"):
         return cfg["watched_s"]
+    if state.get("paper_refresh_s"):
+        # A paper position depends on this price for its stops, whatever else is true of the token.
+        featured = cfg["featured_s"] if is_featured(state, now, cfg) else state["paper_refresh_s"]
+        return min(state["paper_refresh_s"], featured)
     if is_featured(state, now, cfg):
         return cfg["featured_s"]
 

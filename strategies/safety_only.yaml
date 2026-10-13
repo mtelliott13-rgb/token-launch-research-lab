@@ -1,0 +1,25 @@
+# Baseline 2. Graduated tokens that pass the safety checks.
+name: Safety only
+lane: B
+order: 2
+description: Graduated, mint and freeze authority revoked on-chain, top-10 holders under 30%, no bot-volume flag.
+size_sol: 0.5
+
+entry:
+  signal: rules                     # the signal is the first price at which every rule below holds
+  min_minutes_after_migration: 2
+  max_minutes_after_migration: 60   # the rules must come true within the first hour after graduation
+  require:
+    mint_revoked_onchain: true      # read from the chain, not from RugCheck
+    freeze_revoked_onchain: true
+    max_top10_pct: 30               # must be known and below this
+    no_bot_volume: true
+
+# The same exits for all three baselines, so they differ only in what they buy.
+exits:
+  take_profit:
+    - {multiple: 2, sell_fraction: 0.5}   # sell half at 2x the entry price
+  trailing_stop_pct: 30                   # on the rest: sell when 30% below the highest price since entry
+  trailing_after_take_profit: true        # the trailing stop only starts once the first half is sold
+  hard_stop_pct: 40                       # sell everything 40% below the entry price
+  time_stop_hours: 24                     # sell whatever is left 24 hours after entry

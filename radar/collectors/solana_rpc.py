@@ -1,4 +1,4 @@
-"""On-chain check of mint and freeze authority, for the tokens on Rising.
+"""On-chain check of mint and freeze authority, for the tokens on Rising and tokens that just graduated.
 
 Verified 2026-10-09 against https://api.mainnet-beta.solana.com (free, no key):
   POST {"jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts",
@@ -98,6 +98,9 @@ async def run(ctx: Ctx) -> None:
     while True:
         now = time.time()
         rows = due(rising.rising_rows(ctx, now), now, cfg)
+        # Tokens that just graduated are read once too: the shadow bot's safety rules need the chain's answer.
+        have = {r["mint"] for r in rows}
+        rows += [r for r in ctx.store.graduated_unchecked(now - cfg["graduated_window_s"], cfg["batch"] - len(rows)) if r["mint"] not in have]
         try:
             if rows:
                 await check(ctx, rows, now)

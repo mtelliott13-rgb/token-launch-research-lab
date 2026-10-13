@@ -36,6 +36,7 @@ ADDED_COLUMNS = {
         "chain_checked_at": "REAL",
         "chain_mint_authority": "INTEGER",
         "chain_freeze_authority": "INTEGER",
+        "paper_refresh_s": "REAL",
     },
     "outcomes": {"peak": "TEXT", "fate": "TEXT"},
     "safety": {"authority_conflict": "INTEGER"},
@@ -86,7 +87,7 @@ class Store:
         self._migrate()
         self._cols = {
             table: {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
-            for table in ("tokens", "token_state", "snapshots", "safety")
+            for table in ("tokens", "token_state", "snapshots", "safety", "paper_trades", "paper_fills")
         }
 
     def close(self) -> None:
@@ -311,6 +312,34 @@ class Store:
         row = self.db.execute("SELECT * FROM rising_entries WHERE mint = ?", (mint,)).fetchone()
         return dict(row) if row else None
 
+    # ---- shadow bot (paper trades) ----------------------------------------------
+
+    def paper_trades_for(self, mint: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM paper_trades WHERE mint = ? ORDER BY id", (mint,))]
+
+    def add_paper_trade(self, **fields: Any) -> int:
+        self._check("paper_trades", fields)
+        marks = ", ".join("?" * len(fields))
+        return self.db.execute(f"INSERT INTO paper_trades ({', '.join(fields)}) VALUES ({marks})", tuple(fields.values())).lastrowid
+
+    def update_paper_trade(self, trade_id: int, **fields: Any) -> None:
+        self._check("paper_trades", fields)
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(f"UPDATE paper_trades SET {sets} WHERE id = ?", (*fields.values(), trade_id))
+
+    def add_paper_fill(self, **fields: Any) -> None:
+        self._check("paper_fills", fields)
+        marks = ", ".join("?" * len(fields))
+        self.db.execute(f"INSERT INTO paper_fills ({', '.join(fields)}) VALUES ({marks})", tuple(fields.values()))
+
+    def graduated_unchecked(self, since: float, limit: int) -> list[dict[str, Any]]:
+        """Tokens we saw graduate since `since` whose authorities have not been read from the chain."""
+        cur = self.db.execute(
+            f"{ROW_SQL} WHERE s.migrated_at >= ? AND s.chain_checked_at IS NULL ORDER BY s.migrated_at DESC LIMIT ?",
+            (since, limit),
+        )
+        return [dict(r) for r in cur]
+
     # ---- outages ---------------------------------------------------------------
 
     def add_outage(self, source: str, started_at: float, ended_at: float, reason: str | None) -> None:
@@ -388,9 +417,10 @@ class Store:
         return [dict(r) for r in self.db.execute(f"{ROW_SQL} WHERE t.mint IN ({marks})", mints)]
 
     def due(self, now: float, limit: int) -> list[dict[str, Any]]:
-        """Tokens whose pair data is due for a refresh, watched and most overdue first."""
+        """Tokens whose pair data is due for a refresh: watched, then paper positions, then most overdue."""
         cur = self.db.execute(
-            f"{ROW_SQL} WHERE s.next_refresh_at <= ? ORDER BY s.watched DESC, s.next_refresh_at LIMIT ?",
+            f"{ROW_SQL} WHERE s.next_refresh_at <= ? "
+            "ORDER BY s.watched DESC, s.paper_refresh_s IS NOT NULL DESC, s.next_refresh_at LIMIT ?",
             (now, limit),
         )
         return [dict(r) for r in cur]

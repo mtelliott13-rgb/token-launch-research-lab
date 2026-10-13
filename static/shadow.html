@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meme Radar: Shadow Bot</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #151a21; --raised: #1b222b; --line: #252d38;
+    --ink: #e6e9ee; --ink2: #a7b0bd; --muted: #6f7a89;
+    --accent: #5aa9ff; --good: #3fb68b; --warn: #e0a339; --crit: #f0616d;
+    --up: #2bb3a3; --down: #f0616d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8; --panel: #ffffff; --raised: #f0f2f5; --line: #e1e5ea;
+      --ink: #161a20; --ink2: #4a5361; --muted: #7b8494;
+      --accent: #1f6fd1; --good: #1c8a63; --warn: #a86b00; --crit: #c9303f;
+      --up: #128a7e; --down: #c9303f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .muted { color: var(--muted); }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+  #conn, .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink2); white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mark { font-size: 10px; }
+  .mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.crit { color: var(--crit); } .mark.idle { color: var(--muted); }
+  #stats { margin-left: auto; color: var(--ink2); }
+  .nav { display: flex; gap: 4px; }
+  .nav a { padding: 2px 10px; border-radius: 999px; color: var(--ink2); text-decoration: none; }
+  .nav a:hover { color: var(--ink); }
+  .nav a[aria-current=page] { background: var(--raised); color: var(--ink); }
+
+
+  main { display: grid; gap: 12px; padding: 12px 16px; max-width: 1100px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  section > .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  section h2 { font-size: 14px; margin: 0; }
+  .head .sub { color: var(--muted); }
+  .body { padding: 10px 12px; }
+  .note { color: var(--muted); margin-top: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0; }
+  .tile .d { color: var(--ink2); }
+  table { width: 100%; border-collapse: collapse; }
+  th { color: var(--muted); font-weight: 500; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th.num { text-align: right; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td.what { width: 340px; min-width: 200px; }
+  td.what .desc { color: var(--muted); }
+  td.barcell { min-width: 120px; }
+  .bar { height: 14px; min-width: 1px; background: var(--accent); border-radius: 0 4px 4px 0; }
+  tr:hover td { background: var(--raised); }
+  .wrap { overflow-x: auto; }
+  .err { color: var(--muted); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .banner { background: var(--panel); border: 1px solid var(--warn); border-radius: 8px; padding: 12px 14px; }
+  .banner h2 { font-size: 14px; margin: 0 0 4px; }
+  .banner ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink2); }
+  tr.small td { color: var(--muted); }
+  tr.total td { font-weight: 600; border-top: 1px solid var(--muted); }
+  :root { --s1: #4593ea; --s2: #c0841e; --s3: #ae72e6; }
+  @media (prefers-color-scheme: light) { :root { --s1: #1f6fd1; --s2: #a86b00; --s3: #8a4fd0; } }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink2); }
+  #chart { position: relative; }
+  #chart svg { display: block; width: 100%; height: 260px; }
+  #chart .grid { stroke: var(--line); stroke-width: 1; }
+  #chart .zero { stroke: var(--muted); stroke-width: 1; }
+  #chart .axis { fill: var(--muted); font-size: 11px; }
+  #chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; }
+  #chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  #tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: nowrap; }
+  #tip .t { color: var(--muted); margin-bottom: 2px; }
+  #tip .r { display: flex; justify-content: space-between; gap: 14px; }
+  .empty { color: var(--muted); padding: 28px 12px; text-align: center; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .gate { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+  .gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; padding: 12px; }
+  .gates h3 { font-size: 13px; margin: 0 0 6px; }
+  .gates ul { list-style: none; margin: 6px 0 0; padding: 0; }
+  .gates li { display: flex; gap: 8px; padding: 3px 0; }
+  .gates li .have { margin-left: auto; color: var(--ink2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meme Radar</h1>
+  <nav class="nav"><a href="/">Dashboard</a><a href="/data">Data</a><a href="/patterns">Patterns</a><a href="/shadow" aria-current="page">Shadow Bot</a></nav>
+  <span id="conn"><span class="mark idle">●</span><span>loading</span></span>
+  <div id="stats"></div>
+</header>
+
+<main>
+  <div class="banner" id="banner">
+    <h2>Paper trading only</h2>
+    <div id="banner-text">No wallet, no keys, no orders. Every trade on this page is a row in the database, priced from the same DexScreener lookups as the dashboard.</div>
+  </div>
+
+  <section>
+    <div class="head"><h2>Strategies compared</h2><span class="sub" id="cmp-sub"></span></div>
+    <div class="wrap"><table>
+      <thead><tr>
+        <th>Strategy</th>
+        <th class="num" title="Paper trades that have been fully sold">Closed trades</th>
+        <th class="num" title="Share of closed trades that made money after all costs">Hit rate</th>
+        <th class="num" title="The middle trade's return on its 0.5 SOL, after all costs">Median return</th>
+        <th class="num" title="The average trade's return, after all costs. A few big winners pull this far above the median.">Mean return</th>
+        <th class="num" title="Sum of every closed trade's profit or loss, after all costs">Profit</th>
+        <th class="num" title="The same profit with the single best trade taken out">Without best trade</th>
+        <th class="num" title="The largest fall of the running profit from an earlier high">Max drawdown</th>
+        <th class="num" title="Positions still open, and their profit at the last price before selling costs">Open now</th>
+      </tr></thead>
+      <tbody id="cmp"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="cmp-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Equity curve</h2><span class="sub">running profit of closed trades, in SOL, after all costs</span></div>
+    <div class="body">
+      <div class="legend" id="legend"></div>
+      <div id="chart"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Go / no-go gate</h2><span class="sub">what must be true before real trading is even discussed</span></div>
+    <div class="gates" id="gates"></div>
+    <div class="body"><div class="note" id="gate-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>How trades ended</h2><span class="sub">closed trades by the rule that sold them, and entries that never happened</span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Strategy</th><th class="num">Hard stop</th><th class="num">Trailing stop</th><th class="num">Time stop</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit on the way</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">Price vanished</th><th class="num" title="Simulated dropped transaction">Entry did not land</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">No price in time</th><th class="num" title="Closed trades that went 5 minutes or more without a price while open, because the computer slept or DexScreener was unreachable. Their stops could not be applied in that time.">Blind for 5 min+</th><th class="num">Waiting to enter</th><th class="num">Fees paid</th></tr></thead>
+      <tbody id="ends"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Latest trades</h2><span class="sub" id="recent-sub"></span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>When</th><th>Strategy</th><th>Token</th><th>Status</th><th class="num">Return</th><th class="num">Profit</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Assumptions</h2><span class="sub">deliberately harsh</span></div>
+    <div class="body" id="assume"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v; else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const SVG = "http://www.w3.org/2000/svg";
+function s(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null) el.setAttribute(k, v);
+  for (const kid of kids.flat()) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+const DASH = "–";
+const MARKS = { ok: "✓", crit: "✕", idle: "●" };
+const COLORS = ["var(--s1)", "var(--s2)", "var(--s3)"];
+const fmtInt = (v) => v == null ? DASH : Math.round(v).toLocaleString("en-US");
+const fmtPct = (v, d = 1) => v == null ? DASH : (v > 0 ? "+" : "") + v.toFixed(d) + "%";
+const fmtSol = (v, d = 3) => v == null ? DASH : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d) + " SOL";
+const fmtWhen = (ts) => ts == null ? DASH : new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const sign = (v) => v == null || v === 0 ? "" : v > 0 ? " pos" : " neg";
+const num = (text, cls, title) => h("td", { class: "num" + (cls || ""), title }, text);
+const swatch = (i) => h("span", { class: "sw", style: `background:${COLORS[i % COLORS.length]}` });
+const GATE = { "GO": ["ok", "✓"], "NO-GO": ["crit", "✕"], "NOT ENOUGH DATA": ["idle", "●"] };
+const REASONS = { hard_stop: "hard stop", trailing_stop: "trailing stop", time_stop: "time stop", take_profit: "take profit", no_price: "price vanished" };
+
+function gateChip(g) {
+  const [cls, mark] = GATE[g.status];
+  return h("span", { class: "gate" }, h("span", { class: "mark " + cls }, mark), g.status === "NOT ENOUGH DATA" ? "Not enough data" : g.status === "GO" ? "Passes" : "No-go");
+}
+
+function drawChart(d) {
+  const box = $("chart"), list = d.strategies;
+  if (!list.some((x) => x.curve.length)) {
+    box.replaceChildren(h("div", { class: "empty" }, "No closed trades yet. A trade closes when a stop, the time limit or the last take-profit sells it, so the first points appear within a day of the first graduation after the restart."));
+    return;
+  }
+  const W = Math.max(320, box.clientWidth), H = 260, L = 58, R = 12, T = 10, B = 24;
+  const t0 = d.started_at, t1 = Math.max(d.now, t0 + 60);
+  const series = list.map((x) => [[t0, 0], ...x.curve, [t1, x.curve.length ? x.curve[x.curve.length - 1][1] : 0]]);
+  let lo = 0, hi = 0;
+  for (const pts of series) for (const [, v] of pts) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  // Round the scale outwards to tidy steps.
+  const raw = (hi - lo || 1) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= raw);
+  lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  if (hi === lo) hi = lo + step;
+  const digits = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3;
+  const X = (t) => L + (W - L - R) * (t - t0) / (t1 - t0), Y = (v) => T + (H - T - B) * (hi - v) / (hi - lo);
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Running profit per strategy. The same numbers are in the table above." });
+  for (let i = 0; i <= Math.round((hi - lo) / step); i++) {
+    const v = lo + step * i;
+    svg.append(s("line", { class: "grid", x1: L, x2: W - R, y1: Y(v), y2: Y(v) }), s("text", { class: "axis", x: L - 6, y: Y(v) + 4, "text-anchor": "end" }, v.toFixed(digits)));
+  }
+  svg.append(s("line", { class: "zero", x1: L, x2: W - R, y1: Y(0), y2: Y(0) }));
+  for (const [t, anchor] of [[t0, "start"], [t1, "end"]]) svg.append(s("text", { class: "axis", x: X(t), y: H - 6, "text-anchor": anchor }, fmtWhen(t)));
+  series.forEach((pts, i) => {
+    // The profit only changes when a trade closes, so the line moves in steps.
+    let path = `M${X(pts[0][0]).toFixed(1)} ${Y(pts[0][1]).toFixed(1)}`;
+    for (let k = 1; k < pts.length; k++) path += `H${X(pts[k][0]).toFixed(1)}V${Y(pts[k][1]).toFixed(1)}`;
+    svg.append(s("path", { class: "series", d: path, stroke: COLORS[i % COLORS.length] }));
+  });
+  const cross = s("line", { class: "cross", y1: T, y2: H - B, visibility: "hidden" });
+  svg.append(cross);
+  const tip = h("div", { id: "tip", hidden: true });
+  box.replaceChildren(svg, tip);
+  const at = (pts, t) => { let v = 0; for (const [pt, pv] of pts) { if (pt > t) break; v = pv; } return v; };
+  svg.addEventListener("pointermove", (ev) => {
+    const r = svg.getBoundingClientRect(), x = Math.min(W - R, Math.max(L, (ev.clientX - r.left) * W / r.width));
+    const t = t0 + (t1 - t0) * (x - L) / (W - L - R);
+    cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("visibility", "visible");
+    tip.replaceChildren(h("div", { class: "t" }, fmtWhen(t)), ...list.map((x2, i) => h("div", { class: "r" }, h("span", null, swatch(i), x2.name), h("span", { class: "num" }, fmtSol(at(series[i], t))))));
+    tip.hidden = false;
+    const px = x * r.width / W;
+    tip.style.top = "8px";
+    tip.style.left = px > r.width / 2 ? "" : `${px + 12}px`;
+    tip.style.right = px > r.width / 2 ? `${r.width - px + 12}px` : "";
+  });
+  svg.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; });
+}
+
+function render(d) {
+  const A = d.assumptions, list = d.strategies;
+  $("banner-text").textContent = d.started_at == null
+    ? "No wallet, no keys, no orders. Paper trading starts with the first graduation seen after the app is restarted."
+    : `No wallet, no keys, no orders. Every trade here is a row in the database. Paper trading began ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days ago); only tokens that graduated after that are traded.`;
+  $("cmp-sub").textContent = `${list.length} strategies from the strategies/ folder, ${list[0] ? list[0].size_sol : 0.5} SOL per trade`;
+  $("cmp").replaceChildren(...list.map((x, i) => h("tr", null,
+    h("td", { class: "what" }, h("div", null, swatch(i), x.name), h("div", { class: "desc" }, x.description)),
+    num(fmtInt(x.trades)),
+    num(x.hit_rate_pct == null ? DASH : x.hit_rate_pct.toFixed(1) + "%", "", `${x.wins} of ${x.trades}`),
+    num(fmtPct(x.median_return_pct), sign(x.median_return_pct)),
+    num(fmtPct(x.mean_return_pct), sign(x.mean_return_pct)),
+    num(x.trades ? fmtSol(x.profit_sol) : DASH, sign(x.trades ? x.profit_sol : null)),
+    num(fmtSol(x.profit_without_best_sol), sign(x.profit_without_best_sol), x.best_trade_sol == null ? null : `Best trade: ${fmtSol(x.best_trade_sol)}` + (x.best_share_pct == null ? "" : `, ${x.best_share_pct.toFixed(0)}% of the profit`)),
+    num(x.trades ? "−" + x.max_drawdown_sol.toFixed(3) + " SOL" : DASH, "", `Longest run of losing trades: ${x.worst_losing_streak}`),
+    num(x.open ? `${x.open} (${fmtSol(x.open_marked_sol, 2)})` : "0"))));
+  $("cmp-note").textContent = "Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: meme returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
+  $("legend").replaceChildren(...list.map((x, i) => h("span", null, swatch(i), x.name)));
+  drawChart(d);
+
+  $("gates").replaceChildren(...list.map((x, i) => h("div", { class: "tile" },
+    h("h3", null, swatch(i), x.name), gateChip(x.gate),
+    h("ul", null, x.gate.checks.map((c) => h("li", null, h("span", { class: "mark " + (c.ok ? "ok" : "crit") }, c.ok ? MARKS.ok : MARKS.crit), h("span", null, c.name), h("span", { class: "have" }, c.have)))))));
+  $("gate-note").textContent = `A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
+
+  const count = (o, k) => fmtInt(o[k] || 0);
+  $("ends").replaceChildren(...list.map((x, i) => h("tr", null,
+    h("td", { style: "white-space:nowrap" }, swatch(i), x.name),
+    num(count(x.exits, "hard_stop")), num(count(x.exits, "trailing_stop")), num(count(x.exits, "time_stop")), num(fmtInt(x.took_profit)), num(count(x.exits, "no_price")),
+    num(count(x.failed, "entry did not land")), num(fmtInt((x.failed["no price in time"] || 0) + (x.failed["no pool to buy from"] || 0))), num(fmtInt(x.blind), "", x.trades ? `${(100 * x.blind / x.trades).toFixed(0)}% of closed trades` : null), num(fmtInt(x.pending)),
+    num(x.trades ? x.fees_sol.toFixed(3) + " SOL" : DASH))));
+
+  const recent = list.flatMap((x, i) => x.recent.map((t) => ({ ...t, i, strategy: x.name }))).sort((a, b) => (b.closed_at || b.entry_ts) - (a.closed_at || a.entry_ts)).slice(0, 30);
+  $("recent-sub").textContent = recent.length ? "newest first" : "none yet";
+  $("recent").replaceChildren(...recent.map((t) => h("tr", null,
+    h("td", null, fmtWhen(t.closed_at || t.entry_ts)),
+    h("td", null, swatch(t.i), t.strategy),
+    h("td", null, h("a", { href: `https://dexscreener.com/solana/${t.mint}`, target: "_blank", rel: "noopener noreferrer" }, t.symbol || t.mint.slice(0, 6)), " ", h("span", { class: "muted" }, t.name || "")),
+    h("td", null, t.status === "open" ? "open" : "sold: " + (REASONS[t.exit_reason] || t.exit_reason)),
+    num(t.status === "open" ? DASH : fmtPct(t.return_pct), sign(t.return_pct)),
+    num(t.status === "open" ? DASH : fmtSol(t.pnl_sol), sign(t.pnl_sol)))));
+
+  $("assume").replaceChildren(h("ul", { style: "margin:0;padding-left:18px;color:var(--ink2)" },
+    h("li", null, "Entry and exit happen at the next price after a signal or a stop, never at the price that triggered it. A stop set at −40% is filled wherever the price has fallen to by then."),
+    h("li", null, `PumpSwap's trading fee is charged on the way in and on the way out: ${A.fee_range_pct[1]}% for a small token, falling to ${A.fee_range_pct[0]}% for the largest (pump.fun's published table).`),
+    h("li", null, `Each transaction also pays ${A.priority_fee_sol} SOL in priority and network fees.`),
+    h("li", null, `Slippage: the price move a trade of this size causes in the pool, counted ${A.impact_multiplier} times, plus a flat ${A.extra_pct}% each way.`),
+    h("li", null, `${A.entry_fail_pct}% of entries are treated as dropped transactions and never happen. ${A.exit_late_pct}% of exits land one price later.`),
+    h("li", null, `Positions are re-priced every ${A.refresh.fast_s} seconds in their first hour and every ${A.refresh.slow_s} seconds after that. Anything between two prices is invisible: a quick spike to 2× can be missed, and a crash is seen late.`),
+    h("li", null, "If DexScreener stops giving a price for a token, what is left of the position is written off at zero."),
+    h("li", null, "While the computer sleeps nothing is priced, so stops wait until it wakes. Those trades are kept, not hidden.")));
+  $("stats").textContent = `SOL $${d.sol_price_usd ? d.sol_price_usd.toFixed(2) : DASH}`;
+}
+let last = null;
+async function load() {
+  try {
+    const res = await fetch("/api/shadow");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    last = await res.json();
+    render(last);
+    $("conn").replaceChildren(h("span", { class: "mark ok" }, MARKS.ok), h("span", null, "up to date"));
+  } catch (err) {
+    $("conn").replaceChildren(h("span", { class: "mark crit" }, MARKS.crit), h("span", null, "could not load (restart the app if it was started before this page existed)"));
+  }
+}
+load();
+setInterval(load, 30000);
+addEventListener("resize", () => { if (last) drawChart(last); });
+</script>
+</body>
+</html>

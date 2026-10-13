@@ -20,7 +20,7 @@ from radar.collectors.common import apply_snapshot, publish_tokens, to_float, to
 from radar.context import Ctx
 from radar.faillog import FailureLog
 from radar.http import SourceError
-from radar.lab import followups
+from radar.lab import followups, shadow
 from radar.scoring.schedule import next_refresh_delay
 from radar.view import SOL_MINT, clean_text, clean_url, is_mint
 
@@ -161,9 +161,11 @@ async def refresh_batch(ctx: Ctx, batch: list[dict[str, Any]]) -> None:
                 if snap["pair_address"] and (snap["pair_address"], snap["dex_id"]) != (row.get("pool_address"), row.get("dex_id")):
                     store.set_token(mint, pool_address=snap["pair_address"], dex_id=snap["dex_id"])
                 apply_snapshot(ctx, row, snap, NAME, now)
+                shadow.on_snapshot(ctx, row, snap, now)
             else:
                 row["miss_count"] = (row.get("miss_count") or 0) + 1
                 store.update_state(mint, miss_count=row["miss_count"], last_checked_at=now)
+                shadow.on_miss(ctx, row, now)
             followups.record(ctx, row, now, looked_up=True, found=bool(pair))
             delay = next_refresh_delay(row, now, cfg["refresh"])
             store.update_state(mint, next_refresh_at=now + delay if delay is not None else None)

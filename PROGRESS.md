@@ -15,10 +15,11 @@ uv run python -m radar
 Then open http://localhost:8000. Press Ctrl+C in that terminal to stop.
 If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m radar`.
 
-Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`).
+Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`), Shadow Bot (`/shadow`).
 
-**A restart is pending** for the stall watchdog built on 2026-10-11. Everything else below,
-including outage tracking, has been live since the restart on 2026-10-10 at 11:18.
+**A restart is pending** for the shadow bot built on 2026-10-13 (until then the "Shadow Bot"
+link in the header gives "not found"). Everything else below has been live since the restart
+on 2026-10-11 at 19:00.
 
 ## What exists
 
@@ -36,9 +37,11 @@ including outage tracking, has been live since the restart on 2026-10-10 at 11:1
 | Mint and freeze authority fix | 2026-10-09 | `radar/collectors/rugcheck.py` |
 | Routine on-chain authority check | 2026-10-09 | `radar/collectors/solana_rpc.py` |
 | PumpPortal outage tracking | 2026-10-10 | `radar/lab/outages.py` |
+| Stall watchdog and sleep detection | 2026-10-11 | `radar/collectors/pumpportal.py` |
+| Shadow bot, Lane B (paper trades, needs the restart) | 2026-10-13 | `radar/lab/shadow.py`, `strategies/`, `static/shadow.html` |
 
-123 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
-trades, signs or holds keys.
+145 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
+trades, signs or holds keys: the shadow bot only writes rows to the database.
 
 ## When each page will have enough data
 
@@ -224,6 +227,37 @@ Oct 9.
 - **One copy only:** checked 2026-10-11 18:45, one collector process, one PumpPortal connection.
 - **Backup launch sources (researched, not built):** see open decision 10.
 
+## Phase 2b: shadow bot, Lane B (2026-10-13)
+
+Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no orders.
+
+- **Strategies** are files in `strategies/`: `every_graduation.yaml` (first price at least 2
+  minutes after graduation), `safety_only.yaml` (mint and freeze revoked on-chain, top-10 under
+  30%, no bot-volume flag, within an hour of graduation), `momentum_safety.yaml` (the same plus
+  on the Rising list, within 6 hours). The 1-hour and 6-hour windows were my choice.
+- **Exits, the same for all three:** sell half at 2x, then a 30% trailing stop on the rest; hard
+  stop at -40%; time stop at 24 hours. 0.5 SOL per trade, one trade per strategy per token.
+  The trailing stop only starts after the half is sold ("on the rest"); before that the hard
+  stop is the only stop. Change `trailing_after_take_profit` to make it apply from entry.
+- **Pessimism** (`shadow` in `config/settings.yaml`): entry and exit at the next price after
+  the signal or stop; PumpSwap's published fee table (1.25% for small tokens down to 0.30%,
+  pump.fun/docs/fees dated 2026-10-08) each way; 0.001 SOL priority fee per transaction;
+  slippage = twice the pool price impact plus 1% each way; 10% of entries dropped; 10% of exits
+  one price late; a position whose price vanishes is written off at zero.
+- **Refresh:** tokens with a paper position are re-priced every 20 seconds for the first hour
+  and every 60 seconds after, ahead of everything except watched tokens.
+- **On-chain check extended:** every token we see graduate is now checked once on-chain (it
+  used to be Rising tokens only), because the safety rules need it.
+- **Page:** `/shadow` shows per strategy the trade count, hit rate, median and mean return,
+  profit, profit without the best trade, max drawdown, the equity curve, how trades ended, the
+  latest trades and the go/no-go gate (21 days, 200 closed trades, profit after fees, median no
+  worse than -10%, still profitable without the best 2 trades).
+- **Sleep ruins this.** While the Mac sleeps no price is fetched and no stop is applied. The
+  page counts closed trades that were "blind for 5 min+". The outage log shows the Mac asleep
+  for about 18 of the 24 hours before the build. Paper results mean nothing until that is fixed.
+- **Not built:** Lane A (needs trade data), several latencies (we only have one: the next
+  price), deployer reputation, risk exits on creator or early-buyer selling.
+
 ## Outside requests, per day
 
 All free, no keys.
@@ -231,6 +265,7 @@ All free, no keys.
 | Source | Roughly | Our cap |
 |---|---|---|
 | DexScreener prices (live refresh and follow-ups) | up to 60 a minute | 120 a minute |
+| DexScreener prices for paper positions (part of the line above; after the restart) | about 10 to 20 a minute, about 45 at worst (1,000 positions open) | shares the 120 a minute |
 | DexScreener profiles and boosts | 3 a minute | 20 a minute |
 | GeckoTerminal | about 2 a minute plus charts on demand | 8 a minute |
 | RugCheck | a few a minute | 12 a minute |
@@ -287,6 +322,11 @@ $10,000.
     Moralis "new pump.fun tokens" list (free key, could fill gaps after an outage, quota not
     confirmed); Bitquery (free tier too small); pumpdev.io (claimed free, did not answer our
     test). Nothing built yet.
+11. **Keep the Mac awake.** `caffeinate -i` is not preventing sleep (most likely the lid is
+    closed). Options: leave the lid open, or change the system sleep setting (needs your
+    say-so, it is a system setting).
+12. **Shadow bot choices to confirm:** trailing stop only after the half is sold; signal
+    windows of 1 hour (safety) and 6 hours (momentum); 10% dropped entries with no retry.
 
 ## Known limits
 

@@ -165,6 +165,51 @@ onchain:
   cycle_s: 60                   # at most one call a minute
   recheck_s: 1800               # each token is checked at most this often
   batch: 100
+  # Tokens we saw graduate are also checked once, so the shadow bot's safety rules have the
+  # chain's answer. Only graduations newer than this are looked at.
+  graduated_window_s: 21600
+
+# Phase 2b: shadow bot. Paper trades only: it writes rows to the database and nothing else.
+# There is no wallet, no key and no order anywhere in this app. The strategies themselves
+# (what to buy, when to sell, how much) are the files in strategies/.
+shadow:
+  enabled: true
+  strategies_dir: strategies
+  fees:
+    # PumpSwap total fee per trade (creator + protocol + liquidity providers), in percent, by
+    # the token's market cap in SOL: [up to this market cap, fee]. From https://pump.fun/docs/fees
+    # (page dated 2026-10-08). Charged on the way in and again on the way out.
+    pumpswap_tiers: [
+      [420, 1.25], [1470, 1.2], [2460, 1.15], [3440, 1.1], [4420, 1.05],
+      [9820, 1.0], [14740, 0.95], [19650, 0.9], [24560, 0.85], [29470, 0.8],
+      [34380, 0.75], [39300, 0.7], [44210, 0.65], [49120, 0.6], [54030, 0.55],
+      [58940, 0.525], [63860, 0.5], [68770, 0.475], [73681, 0.45], [78590, 0.425],
+      [83500, 0.4], [88400, 0.375], [93330, 0.35], [98240, 0.325], [null, 0.3]
+    ]
+    priority_fee_sol: 0.001       # per transaction: priority fee plus tip, a common default
+    network_fee_sol: 0.000005     # Solana's base fee per transaction
+  slippage:
+    # A pool of the usual kind moves the price by (trade size / SOL side of the pool). DexScreener
+    # reports both sides together, so the SOL side is taken as half.
+    pool_share: 0.5
+    impact_multiplier: 2.0        # pessimism: count that price move twice
+    extra_pct: 1.0                # and lose a further 1% each way to the price moving before we land
+  entry_fail_pct: 10              # this share of entries never lands (dropped transaction); no retry
+  exit_late_pct: 10               # this share of exits lands one price later than it should
+  max_entry_wait_s: 300           # no price within this long after the entry was due: the entry is void
+  no_price_misses: 10             # this many lookups in a row with no price: the rest is written off at zero
+  rising_fresh_s: 30              # "on Rising" means seen on the list within this long
+  # How often DexScreener is asked for a token with a paper position, so stops are applied.
+  refresh:
+    fast_s: 20                    # while an entry is waiting and for the first hour of a position
+    fast_window_s: 3600
+    slow_s: 60                    # after that, until the position is closed
+  # Go / no-go gate for real trading (Phase 6). All must hold; it stays NO-GO until they do.
+  gate:
+    min_days: 21
+    min_trades: 200
+    median_min_pct: -10           # the median trade may not be worse than this
+    drop_best: 2                  # still profitable with this many best trades removed
 
 # How often each token's pair data is re-fetched from DexScreener (seconds).
 # A token that matches no rule stops being refreshed; the follow-up checks above still happen.

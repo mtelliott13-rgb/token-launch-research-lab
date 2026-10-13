@@ -1,0 +1,21 @@
+# Baseline 1. Buys every token that graduates, with no filter at all.
+# This is the benchmark: a filter is only worth having if it beats this.
+name: Every graduation
+lane: B
+order: 1
+description: Enter on the first price at least 2 minutes after the token graduates.
+size_sol: 0.5
+
+entry:
+  signal: migration                 # the signal is the graduation itself
+  min_minutes_after_migration: 2
+  require: {}
+
+# The same exits for all three baselines, so they differ only in what they buy.
+exits:
+  take_profit:
+    - {multiple: 2, sell_fraction: 0.5}   # sell half at 2x the entry price
+  trailing_stop_pct: 30                   # on the rest: sell when 30% below the highest price since entry
+  trailing_after_take_profit: true        # the trailing stop only starts once the first half is sold
+  hard_stop_pct: 40                       # sell everything 40% below the entry price
+  time_stop_hours: 24                     # sell whatever is left 24 hours after entry

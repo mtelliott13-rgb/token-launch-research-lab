@@ -185,7 +185,8 @@ CREATE TABLE IF NOT EXISTS token_state (
     -- these win over RugCheck's reading above. NULL values with a time = the account could not be read.
     chain_checked_at            REAL,
     chain_mint_authority        INTEGER,
-    chain_freeze_authority      INTEGER
+    chain_freeze_authority      INTEGER,
+    paper_refresh_s             REAL     -- shadow bot has a position here: refresh this often
 );
 CREATE INDEX IF NOT EXISTS idx_state_next_refresh ON token_state(next_refresh_at);
 CREATE INDEX IF NOT EXISTS idx_state_score ON token_state(score);
@@ -277,3 +278,58 @@ CREATE TABLE IF NOT EXISTS meta (
     key             TEXT PRIMARY KEY,
     value           TEXT
 );
+
+-- Shadow bot (Phase 2b): paper trades only. Nothing here is ever sent to a wallet or an exchange.
+-- One row per strategy and token: pending (signal seen, waiting for the next price), open,
+-- closed, or failed (the entry never happened, with the reason in exit_reason).
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id              INTEGER PRIMARY KEY,
+    strategy        TEXT NOT NULL,     -- file name in strategies/ without .yaml
+    lane            TEXT NOT NULL,
+    mint            TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    signal_ts       REAL NOT NULL,
+    signal_price    REAL,
+    migrated_at     REAL,
+    entry_ts        REAL,
+    entry_price     REAL,              -- the snapshot price; what we paid is worse (see paper_fills)
+    size_sol        REAL NOT NULL,
+    tokens          REAL,              -- bought
+    tokens_left     REAL,
+    cost_sol        REAL,              -- size plus the entry transaction fee
+    proceeds_sol    REAL NOT NULL DEFAULT 0,
+    fees_sol        REAL NOT NULL DEFAULT 0,   -- trading fees and transaction fees, all fills
+    peak_price      REAL,
+    steps_done      INTEGER NOT NULL DEFAULT 0, -- take-profit steps already sold
+    exit_due        TEXT,              -- a rule fired; sell at the next price
+    exit_fraction   REAL,              -- of the tokens bought
+    exit_skip       INTEGER NOT NULL DEFAULT 0, -- prices to let pass first (a late exit)
+    misses          INTEGER NOT NULL DEFAULT 0, -- lookups in a row that found no price
+    max_gap_s       REAL NOT NULL DEFAULT 0,    -- longest wait between two prices while open (sleep, outage)
+    last_price      REAL,
+    last_ts         REAL,
+    closed_at       REAL,
+    exit_reason     TEXT,
+    pnl_sol         REAL,
+    return_pct      REAL,
+    UNIQUE (strategy, mint)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_mint ON paper_trades(mint);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status, strategy);
+
+CREATE TABLE IF NOT EXISTS paper_fills (
+    id              INTEGER PRIMARY KEY,
+    trade_id        INTEGER NOT NULL,
+    ts              REAL NOT NULL,
+    side            TEXT NOT NULL,     -- buy / sell
+    reason          TEXT NOT NULL,
+    price_usd       REAL,
+    liquidity_usd   REAL,
+    sol_usd         REAL,
+    tokens          REAL,
+    sol             REAL,              -- paid (buy) or received (sell), after every cost
+    fee_pct         REAL,
+    impact_pct      REAL,
+    fees_sol        REAL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_fills_trade ON paper_fills(trade_id);
