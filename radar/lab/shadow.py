@@ -33,8 +33,6 @@ from radar.context import Ctx
 log = logging.getLogger(__name__)
 
 START_KEY = "shadow_started_at"
-# A position that went this long without a price was flying blind (the computer slept, or an outage).
-BLIND_GAP_S = 300
 ACTIVE = ("pending", "open")
 
 
@@ -392,11 +390,23 @@ def summarise(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "worst_losing_streak": worst_streak,
         "fees_sol": sum(t["fees_sol"] for t in closed),
         "took_profit": sum(1 for t in closed if t.get("steps_done")),
-        "blind": sum(1 for t in closed if (t.get("max_gap_s") or 0) >= BLIND_GAP_S),
         "exits": {reason: sum(1 for t in closed if t["exit_reason"] == reason) for reason in sorted({t["exit_reason"] for t in closed})},
         "curve": [[t["closed_at"], round(v, 6)] for t, v in zip(closed, curve)],
         "ranked": ranked,
     }
+
+
+def affected(trade: Mapping[str, Any], gap_s: float, now: float) -> bool:
+    """Whether a position went `gap_s` or longer without a price while it was open.
+
+    Nobody was watching it in that time, so its stops could not fire and its result says more
+    about the outage than about the strategy. For a position still open, the wait since its
+    last price counts too.
+    """
+    gap = trade.get("max_gap_s") or 0
+    if trade["status"] == "open" and trade.get("last_ts"):
+        gap = max(gap, now - trade["last_ts"])
+    return trade["status"] in ("open", "closed") and gap >= gap_s
 
 
 def gate(summary: Mapping[str, Any], days: float, cfg: Mapping[str, Any]) -> dict[str, Any]:
@@ -430,7 +440,12 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
         cur = db.execute("SELECT * FROM paper_trades WHERE strategy = ?", (spec["id"],))
         columns = [c[0] for c in cur.description]   # works whatever row type the connection returns
         trades = [dict(zip(columns, r)) for r in cur]
-        summary = summarise(trades)
+        for t in trades:
+            t["affected"] = affected(t, shadow["outage_gap_s"], now)
+        # The headline numbers, the curve and the gate use only trades that were watched throughout.
+        summary = summarise([t for t in trades if not t["affected"]])
+        hit = summarise([t for t in trades if t["affected"]])
+        everything = summarise(trades)
         opened = [t for t in trades if t["status"] == "open"]
         failed = [t for t in trades if t["status"] == "failed"]
         # Open positions at their last price, before any selling cost: a rough guide only.
@@ -444,11 +459,13 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
         out.append({
             "id": spec["id"], "name": spec["name"], "description": spec["description"], "lane": spec["lane"], "size_sol": spec["size_sol"],
             **{k: v for k, v in summary.items() if k != "ranked"},
-            "open": len(opened), "open_marked_sol": marked,
+            "open": len(opened), "open_marked_sol": marked, "open_affected": sum(1 for t in opened if t["affected"]),
+            "affected": {k: hit[k] for k in ("trades", "wins", "hit_rate_pct", "median_return_pct", "mean_return_pct", "profit_sol", "exits")},
+            "all": {k: everything[k] for k in ("trades", "profit_sol")},
             "pending": sum(1 for t in trades if t["status"] == "pending"),
             "failed": {reason: sum(1 for t in failed if t["exit_reason"] == reason) for reason in sorted({t["exit_reason"] for t in failed})},
             "gate": gate(summary, days, shadow["gate"]),
-            "recent": [{k: t[k] for k in ("mint", "status", "entry_ts", "entry_price", "closed_at", "exit_reason", "pnl_sol", "return_pct", "last_price")} for t in recent],
+            "recent": [{k: t[k] for k in ("mint", "status", "entry_ts", "entry_price", "closed_at", "exit_reason", "pnl_sol", "return_pct", "last_price", "affected", "max_gap_s")} for t in recent],
         })
     names = {r[0]: (r[1], r[2]) for r in db.execute(
         "SELECT mint, symbol, name FROM tokens WHERE mint IN (SELECT mint FROM paper_trades WHERE status IN ('open', 'closed'))")}
@@ -462,6 +479,6 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
             "fee_range_pct": [min(p for _, p in shadow["fees"]["pumpswap_tiers"]), max(p for _, p in shadow["fees"]["pumpswap_tiers"])],
             "impact_multiplier": shadow["slippage"]["impact_multiplier"], "extra_pct": shadow["slippage"]["extra_pct"],
             "entry_fail_pct": shadow["entry_fail_pct"], "exit_late_pct": shadow["exit_late_pct"],
-            "refresh": shadow["refresh"], "gate": shadow["gate"],
+            "refresh": shadow["refresh"], "gate": shadow["gate"], "outage_gap_s": shadow["outage_gap_s"],
         },
     }

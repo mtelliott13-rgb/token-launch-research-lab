@@ -197,6 +197,10 @@ shadow:
   entry_fail_pct: 10              # this share of entries never lands (dropped transaction); no retry
   exit_late_pct: 10               # this share of exits lands one price later than it should
   max_entry_wait_s: 300           # no price within this long after the entry was due: the entry is void
+  # A position that went this long without a price while open (the computer slept, the app was
+  # off, DexScreener was unreachable) is "affected by outage": its stops could not be applied.
+  # Those trades are shown separately and left out of the headline numbers and the gate.
+  outage_gap_s: 300
   no_price_misses: 10             # this many lookups in a row with no price: the rest is written off at zero
   rising_fresh_s: 30              # "on Rising" means seen on the list within this long
   # How often DexScreener is asked for a token with a paper position, so stops are applied.

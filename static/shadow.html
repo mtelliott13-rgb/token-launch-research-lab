@@ -113,7 +113,7 @@
     <div class="wrap"><table>
       <thead><tr>
         <th>Strategy</th>
-        <th class="num" title="Paper trades that have been fully sold">Closed trades</th>
+        <th class="num" title="Paper trades that have been fully sold and had a price at least every few minutes while open. Trades affected by an outage are in the next table.">Closed trades</th>
         <th class="num" title="Share of closed trades that made money after all costs">Hit rate</th>
         <th class="num" title="The middle trade's return on its 0.5 SOL, after all costs">Median return</th>
         <th class="num" title="The average trade's return, after all costs. A few big winners pull this far above the median.">Mean return</th>
@@ -128,7 +128,26 @@
   </section>
 
   <section>
-    <div class="head"><h2>Equity curve</h2><span class="sub">running profit of closed trades, in SOL, after all costs</span></div>
+    <div class="head"><h2>Affected by outage</h2><span class="sub" id="aff-sub"></span></div>
+    <div class="wrap"><table>
+      <thead><tr>
+        <th>Strategy</th>
+        <th class="num" title="Closed trades that went too long without a price while open">Closed trades</th>
+        <th class="num" title="Affected trades as a share of every closed trade">Share of all closed</th>
+        <th class="num">Hit rate</th>
+        <th class="num">Median return</th>
+        <th class="num">Mean return</th>
+        <th class="num" title="Profit or loss of the affected trades alone">Profit</th>
+        <th class="num" title="Positions still open that have already gone too long without a price">Open now</th>
+        <th class="num" title="Every closed trade, affected or not">All trades together</th>
+      </tr></thead>
+      <tbody id="aff"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="aff-note"></div></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Equity curve</h2><span class="sub">running profit of closed trades that were watched throughout, in SOL, after all costs</span></div>
     <div class="body">
       <div class="legend" id="legend"></div>
       <div id="chart"></div>
@@ -144,7 +163,7 @@
   <section>
     <div class="head"><h2>How trades ended</h2><span class="sub">closed trades by the rule that sold them, and entries that never happened</span></div>
     <div class="wrap"><table>
-      <thead><tr><th>Strategy</th><th class="num">Hard stop</th><th class="num">Trailing stop</th><th class="num">Time stop</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit on the way</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">Price vanished</th><th class="num" title="Simulated dropped transaction">Entry did not land</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">No price in time</th><th class="num" title="Closed trades that went 5 minutes or more without a price while open, because the computer slept or DexScreener was unreachable. Their stops could not be applied in that time.">Blind for 5 min+</th><th class="num">Waiting to enter</th><th class="num">Fees paid</th></tr></thead>
+      <thead><tr><th>Strategy</th><th class="num">Hard stop</th><th class="num">Trailing stop</th><th class="num">Time stop</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit first</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">Price vanished</th><th class="num" title="Simulated dropped transaction">Entry dropped</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">No entry price</th><th class="num">Waiting</th><th class="num">Fees paid</th></tr></thead>
       <tbody id="ends"></tbody>
     </table></div>
   </section>
@@ -255,6 +274,14 @@ function drawChart(d) {
 
 function render(d) {
   const A = d.assumptions, list = d.strategies;
+  // A collector started before this split existed sends neither field: show everything as watched until it is restarted.
+  const stale = list.some((x) => !x.affected);
+  if (A.outage_gap_s == null) A.outage_gap_s = 300;
+  for (const x of list) {
+    x.affected = x.affected || { trades: 0, wins: 0, hit_rate_pct: null, median_return_pct: null, mean_return_pct: null, profit_sol: 0 };
+    x.all = x.all || { trades: x.trades, profit_sol: x.profit_sol };
+    x.open_affected = x.open_affected || 0;
+  }
   $("banner-text").textContent = d.started_at == null
     ? "No wallet, no keys, no orders. Paper trading starts with the first graduation seen after the app is restarted."
     : `No wallet, no keys, no orders. Every trade here is a row in the database. Paper trading began ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days ago); only tokens that graduated after that are traded.`;
@@ -269,20 +296,33 @@ function render(d) {
     num(fmtSol(x.profit_without_best_sol), sign(x.profit_without_best_sol), x.best_trade_sol == null ? null : `Best trade: ${fmtSol(x.best_trade_sol)}` + (x.best_share_pct == null ? "" : `, ${x.best_share_pct.toFixed(0)}% of the profit`)),
     num(x.trades ? "−" + x.max_drawdown_sol.toFixed(3) + " SOL" : DASH, "", `Longest run of losing trades: ${x.worst_losing_streak}`),
     num(x.open ? `${x.open} (${fmtSol(x.open_marked_sol, 2)})` : "0"))));
-  $("cmp-note").textContent = "Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: meme returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
+  const gapMin = Math.round(A.outage_gap_s / 60);
+  $("aff-sub").textContent = `trades that went ${gapMin}+ minutes without a price while open: not in the table above, the equity curve or the gate`;
+  $("aff").replaceChildren(...list.map((x, i) => { const a = x.affected; return h("tr", null,
+    h("td", { style: "white-space:nowrap" }, swatch(i), x.name),
+    num(fmtInt(a.trades)),
+    num(x.all.trades ? (100 * a.trades / x.all.trades).toFixed(0) + "%" : DASH, "", `${a.trades} of ${x.all.trades}`),
+    num(a.hit_rate_pct == null ? DASH : a.hit_rate_pct.toFixed(1) + "%", "", `${a.wins} of ${a.trades}`),
+    num(fmtPct(a.median_return_pct), sign(a.median_return_pct)),
+    num(fmtPct(a.mean_return_pct), sign(a.mean_return_pct)),
+    num(a.trades ? fmtSol(a.profit_sol) : DASH, sign(a.trades ? a.profit_sol : null)),
+    num(fmtInt(x.open_affected), "", `of ${x.open} open`),
+    num(x.all.trades ? fmtSol(x.all.profit_sol) : DASH, sign(x.all.trades ? x.all.profit_sol : null))); }));
+  $("aff-note").textContent = stale ? "Restart the collector to fill this table: the running one was started before trades were split this way, so for now every trade is counted above." : `While the computer sleeps or the app is off, no price is fetched and no stop can fire, so these results say more about the outage than about the strategy. Leaving them out is not neutral, though: a trade that runs for hours is more likely to meet an outage than one stopped out in minutes, so long-running trades (which include most big winners) are under-counted above. If the share in this table is large, treat every number on this page with suspicion.`;
+  $("cmp-note").textContent = "Only trades that were watched throughout are counted here. Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: meme returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
   $("legend").replaceChildren(...list.map((x, i) => h("span", null, swatch(i), x.name)));
   drawChart(d);
 
   $("gates").replaceChildren(...list.map((x, i) => h("div", { class: "tile" },
     h("h3", null, swatch(i), x.name), gateChip(x.gate),
     h("ul", null, x.gate.checks.map((c) => h("li", null, h("span", { class: "mark " + (c.ok ? "ok" : "crit") }, c.ok ? MARKS.ok : MARKS.crit), h("span", null, c.name), h("span", { class: "have" }, c.have)))))));
-  $("gate-note").textContent = `A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
+  $("gate-note").textContent = `Trades affected by an outage are left out of every line. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
 
   const count = (o, k) => fmtInt(o[k] || 0);
   $("ends").replaceChildren(...list.map((x, i) => h("tr", null,
     h("td", { style: "white-space:nowrap" }, swatch(i), x.name),
     num(count(x.exits, "hard_stop")), num(count(x.exits, "trailing_stop")), num(count(x.exits, "time_stop")), num(fmtInt(x.took_profit)), num(count(x.exits, "no_price")),
-    num(count(x.failed, "entry did not land")), num(fmtInt((x.failed["no price in time"] || 0) + (x.failed["no pool to buy from"] || 0))), num(fmtInt(x.blind), "", x.trades ? `${(100 * x.blind / x.trades).toFixed(0)}% of closed trades` : null), num(fmtInt(x.pending)),
+    num(count(x.failed, "entry did not land")), num(fmtInt((x.failed["no price in time"] || 0) + (x.failed["no pool to buy from"] || 0))), num(fmtInt(x.pending)),
     num(x.trades ? x.fees_sol.toFixed(3) + " SOL" : DASH))));
 
   const recent = list.flatMap((x, i) => x.recent.map((t) => ({ ...t, i, strategy: x.name }))).sort((a, b) => (b.closed_at || b.entry_ts) - (a.closed_at || a.entry_ts)).slice(0, 30);
@@ -291,7 +331,8 @@ function render(d) {
     h("td", null, fmtWhen(t.closed_at || t.entry_ts)),
     h("td", null, swatch(t.i), t.strategy),
     h("td", null, h("a", { href: `https://dexscreener.com/solana/${t.mint}`, target: "_blank", rel: "noopener noreferrer" }, t.symbol || t.mint.slice(0, 6)), " ", h("span", { class: "muted" }, t.name || "")),
-    h("td", null, t.status === "open" ? "open" : "sold: " + (REASONS[t.exit_reason] || t.exit_reason)),
+    h("td", null, t.status === "open" ? "open" : "sold: " + (REASONS[t.exit_reason] || t.exit_reason),
+      t.affected ? h("span", { class: "gate", style: "margin-left:8px", title: `Went ${Math.round(Math.max(t.max_gap_s || 0, A.outage_gap_s) / 60)} minutes or more without a price while open` }, h("span", { class: "mark warn" }, "▲"), "affected by outage") : null),
     num(t.status === "open" ? DASH : fmtPct(t.return_pct), sign(t.return_pct)),
     num(t.status === "open" ? DASH : fmtSol(t.pnl_sol), sign(t.pnl_sol)))));
 
@@ -303,7 +344,7 @@ function render(d) {
     h("li", null, `${A.entry_fail_pct}% of entries are treated as dropped transactions and never happen. ${A.exit_late_pct}% of exits land one price later.`),
     h("li", null, `Positions are re-priced every ${A.refresh.fast_s} seconds in their first hour and every ${A.refresh.slow_s} seconds after that. Anything between two prices is invisible: a quick spike to 2× can be missed, and a crash is seen late.`),
     h("li", null, "If DexScreener stops giving a price for a token, what is left of the position is written off at zero."),
-    h("li", null, "While the computer sleeps nothing is priced, so stops wait until it wakes. Those trades are kept, not hidden.")));
+    h("li", null, `While the computer sleeps nothing is priced, so stops wait until it wakes. A trade that went ${gapMin} minutes or more without a price is marked "affected by outage", shown in its own table and left out of the headline numbers and the gate.`)));
   $("stats").textContent = `SOL $${d.sol_price_usd ? d.sol_price_usd.toFixed(2) : DASH}`;
 }
 let last = null;

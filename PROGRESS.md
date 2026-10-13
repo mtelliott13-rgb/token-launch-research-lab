@@ -17,9 +17,9 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`), Shadow Bot (`/shadow`).
 
-**A restart is pending** for the shadow bot built on 2026-10-13 (until then the "Shadow Bot"
-link in the header gives "not found"). Everything else below has been live since the restart
-on 2026-10-11 at 19:00.
+**A restart is pending** for the "affected by outage" split on the Shadow Bot page (built
+2026-10-13). Everything else below, including the shadow bot, has been live since the restart
+on 2026-10-13 at 15:32.
 
 ## What exists
 
@@ -38,9 +38,9 @@ on 2026-10-11 at 19:00.
 | Routine on-chain authority check | 2026-10-09 | `radar/collectors/solana_rpc.py` |
 | PumpPortal outage tracking | 2026-10-10 | `radar/lab/outages.py` |
 | Stall watchdog and sleep detection | 2026-10-11 | `radar/collectors/pumpportal.py` |
-| Shadow bot, Lane B (paper trades, needs the restart) | 2026-10-13 | `radar/lab/shadow.py`, `strategies/`, `static/shadow.html` |
+| Shadow bot, Lane B (paper trades) | 2026-10-13 | `radar/lab/shadow.py`, `strategies/`, `static/shadow.html` |
 
-145 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
+146 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
 trades, signs or holds keys: the shadow bot only writes rows to the database.
 
 ## When each page will have enough data
@@ -257,8 +257,13 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
   latest trades and the go/no-go gate (21 days, 200 closed trades, profit after fees, median no
   worse than -10%, still profitable without the best 2 trades).
 - **Sleep ruins this.** While the Mac sleeps no price is fetched and no stop is applied. The
-  page counts closed trades that were "blind for 5 min+". The outage log shows the Mac asleep
-  for about 18 of the 24 hours before the build. Paper results mean nothing until that is fixed.
+  outage log shows the Mac asleep for about 18 of the 24 hours before the build.
+- **Affected by outage (2026-10-13, needs the restart):** a trade that went 5 minutes or more
+  without a price while open (`shadow.outage_gap_s`) is marked "affected by outage". Those
+  trades have their own table on the page and are left out of the headline numbers, the equity
+  curve and the gate. Nothing is deleted: the flag comes from `paper_trades.max_gap_s`, and the
+  page also shows all trades together. Caveat: long-running trades meet outages more often than
+  quick stop-outs, so leaving them out under-counts long holds, which include most big winners.
 - **Not built:** Lane A (needs trade data), several latencies (we only have one: the next
   price), deployer reputation, risk exits on creator or early-buyer selling.
 

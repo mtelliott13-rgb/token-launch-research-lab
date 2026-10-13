@@ -138,7 +138,12 @@ def test_time_stop_sells_what_is_left_after_24_hours():
     trades, fills, _ = engine([(125, 1.00), (3600, 1.30), (86400 + 130, 1.20), (86400 + 190, 1.25)])
     assert trades["every_graduation"]["exit_reason"] == "time_stop" and fills[-1]["price_usd"] == 1.25
     assert trades["every_graduation"]["max_gap_s"] == 86400 + 130 - 3600   # the longest stretch without a price
-    assert shadow.summarise(list(trades.values()))["blind"] == 1
+    trade = trades["every_graduation"]
+    assert shadow.affected(trade, 300, T0 + 90000) and not shadow.affected({**trade, "max_gap_s": 299.0}, 300, T0 + 90000)
+    # Still open and no price for 5 minutes: affected already, before the gap is ever recorded.
+    waiting = {"status": "open", "max_gap_s": 20.0, "last_ts": T0}
+    assert not shadow.affected(waiting, 300, T0 + 200) and shadow.affected(waiting, 300, T0 + 300)
+    assert not shadow.affected({"status": "failed", "max_gap_s": 0.0}, 300, T0)
 
 
 def test_no_trade_when_the_first_price_comes_too_late_or_the_token_graduated_before_we_started():
@@ -269,3 +274,37 @@ def test_the_page_report_reads_a_database_file_on_its_own_connection(tmp_path):
     report = stats.shadow_from(store, CFG, shadow.load_strategies(), T0 + 3600)
     assert report["strategies"][0]["trades"] == 1 and report["strategies"][0]["recent"][0]["symbol"] == "PAPER"
     store.close()
+
+
+def test_trades_affected_by_an_outage_are_reported_apart_and_kept_out_of_the_gate():
+    async def flow(ctx):
+        store = ctx.store
+        store.set_meta(shadow.START_KEY, str(T0 - 30 * 86400))
+        n = 0
+
+        def add(pnl, gap, status="closed"):
+            nonlocal n
+            n += 1
+            mint = f"M{n}"
+            store.upsert_token(mint, source="pumpportal", first_seen_at=T0, created_at=T0, symbol=mint)
+            store.add_paper_trade(strategy="every_graduation", lane="B", mint=mint, status=status, signal_ts=T0, size_sol=0.5,
+                                  entry_ts=T0, closed_at=T0 + n if status == "closed" else None, pnl_sol=pnl, return_pct=200 * pnl if pnl is not None else None,
+                                  fees_sol=0.01, exit_reason="hard_stop" if status == "closed" else None, max_gap_s=gap, last_ts=T0 + 990,
+                                  proceeds_sol=0, cost_sol=0.501, tokens=1.0, tokens_left=1.0, last_price=1.0)
+
+        for _ in range(250):
+            add(0.02, 60.0)                 # watched throughout: small steady wins
+        for _ in range(40):
+            add(-0.5, 2700.0)               # slept through a crash: total losses
+        add(None, 20.0, "open")             # open and priced 10 seconds ago
+        add(None, 900.0, "open")            # open, and went 15 minutes without a price earlier
+        return shadow.report(store.db, ctx.cfg, shadow.strategies(ctx), T0 + 1000)
+
+    report, _, _ = run(lambda request: None, flow)
+    s = report["strategies"][0]
+    assert s["trades"] == 250 and s["profit_sol"] == pytest.approx(5.0) and len(s["curve"]) == 250
+    assert s["affected"]["trades"] == 40 and s["affected"]["profit_sol"] == pytest.approx(-20.0) and s["affected"]["median_return_pct"] == pytest.approx(-100)
+    assert s["all"] == {"trades": 290, "profit_sol": pytest.approx(-15.0)}
+    assert s["gate"]["status"] == "GO"                                  # judged on the 250 watched trades only
+    assert s["open"] == 2 and s["open_affected"] == 1
+    assert sum(t["affected"] for t in s["recent"]) >= 1 and report["assumptions"]["outage_gap_s"] == 300
