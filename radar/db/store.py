@@ -39,6 +39,7 @@ ADDED_COLUMNS = {
         "paper_refresh_s": "REAL",
     },
     "outcomes": {"peak": "TEXT", "fate": "TEXT"},
+    "paper_trades": {"rules_version": "INTEGER NOT NULL DEFAULT 1", "signal_json": "TEXT", "entry_json": "TEXT"},
     "safety": {"authority_conflict": "INTEGER"},
     "followups": {
         "vol_m5": "REAL", "vol_h1": "REAL", "buys_m5": "INTEGER", "sells_m5": "INTEGER",
@@ -331,6 +332,9 @@ class Store:
         self._check("paper_fills", fields)
         marks = ", ".join("?" * len(fields))
         self.db.execute(f"INSERT INTO paper_fills ({', '.join(fields)}) VALUES ({marks})", tuple(fields.values()))
+
+    def migration_count(self, mint: str) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM migrations WHERE mint = ?", (mint,)).fetchone()[0]
 
     def graduated_unchecked(self, since: float, limit: int) -> list[dict[str, Any]]:
         """Tokens we saw graduate since `since` whose authorities have not been read from the chain."""

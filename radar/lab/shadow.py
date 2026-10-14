@@ -20,6 +20,7 @@ other under the same harsh assumptions, not a forecast of real returns.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import statistics
 from pathlib import Path
@@ -29,10 +30,28 @@ import yaml
 
 from radar.config import ROOT
 from radar.context import Ctx
+from radar.lab.outages import launch_unseen
+from radar.view import SOL_MINT
 
 log = logging.getLogger(__name__)
 
-START_KEY = "shadow_started_at"
+START_KEY = "shadow_started_at"                    # when paper trading first began
+VERSION_START_KEY = "shadow_rules_started_at:{}"   # when each rules version began
+FINGERPRINT_KEY = "shadow_rules_fingerprint:{}"    # what the rules were when it began
+# The settings that change what a trade does. A change here without a new rules_version is flagged.
+RULE_SETTINGS = ("fees", "slippage", "entry_limits", "entry_fail_pct", "exit_late_pct", "max_entry_wait_s", "no_price_misses", "rising_fresh_s")
+# Token and market fields the engine saw, saved with each trade at the signal and at the entry.
+SEEN_ROW = (
+    "top10_pct", "top_holder_pct", "lp_locked_pct", "risk_score", "total_holders", "rugged", "safety_ts",
+    "mint_authority_enabled", "freeze_authority_enabled", "authority_conflict",
+    "chain_mint_authority", "chain_freeze_authority", "chain_checked_at",
+    "bot_volume", "score", "vol_accel", "buy_pressure", "txn_growth", "rising_seen_at", "trending_seen_at",
+    "boost_seen_at", "mayhem_mode", "theme", "launchpad", "created_at", "initial_buy_sol",
+)
+SEEN_SNAP = (
+    "price_usd", "mcap", "liquidity_usd", "vol_m5", "vol_h1", "vol_h24", "buys_m5", "sells_m5", "buys_h1", "sells_h1",
+    "price_chg_m5", "price_chg_h1", "boosts_active", "dex_id", "pair_address", "quote_mint",
+)
 ACTIVE = ("pending", "open")
 
 
@@ -93,6 +112,45 @@ RULES = {
 
 def rules_hold(strategy: Mapping[str, Any], row: Mapping[str, Any], now: float, cfg: Mapping[str, Any]) -> bool:
     return all(RULES[name](row, want, now, cfg) for name, want in strategy["require"].items())
+
+
+def fingerprint(specs: Sequence[Mapping[str, Any]], cfg: Mapping[str, Any]) -> str:
+    """A short code that changes whenever a strategy file or a rule setting changes."""
+    rules = {"strategies": [{k: v for k, v in s.items() if k not in ("name", "description", "order")} for s in specs],
+             "settings": {k: cfg[k] for k in RULE_SETTINGS}}
+    return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def seen(row: Mapping[str, Any], snap: Mapping[str, Any], now: float, cfg: Mapping[str, Any], sol_usd: float | None) -> str:
+    """Exactly what the engine knew about the token at this moment, as JSON."""
+    values = {k: row.get(k) for k in SEEN_ROW}
+    values.update({k: snap.get(k) for k in SEEN_SNAP})
+    values.update(
+        ts=now, sol_usd=sol_usd,
+        on_rising=bool(row.get("score") is not None and now - (row.get("rising_seen_at") or 0) <= cfg["rising_fresh_s"]),
+        seconds_since_graduation=now - row["migrated_at"] if row.get("migrated_at") else None,
+        safety_age_s=now - row["safety_ts"] if row.get("safety_ts") else None,
+    )
+    return json.dumps(values)
+
+
+def not_a_graduation(ctx: Ctx, row: Mapping[str, Any]) -> str | None:
+    """Why this token must not be traded as a graduation, or None if it is the real thing.
+
+    PumpPortal's "migrate" message only says that a PumpSwap pool was opened for a token.
+    Anyone can open one for any token, including USDC or a wrapped stock, so the message alone
+    proves nothing. A real graduation is a token we watched launch on pump.fun's bonding curve,
+    migrating for the first time.
+    """
+    if row["mint"] in ctx.cfg["rising"]["exclude_mints"]:
+        return "on the exclusion list (stablecoin or major token)"
+    created = row.get("created_at")
+    if (row.get("source") != "pumpportal" or row.get("launchpad") != "pump.fun" or not row.get("bonding_curve")
+            or created is None or created >= row["migrated_at"] or launch_unseen(row, ctx.outages)):
+        return "we did not see it launch on pump.fun"
+    if ctx.store.migration_count(row["mint"]) != 1:
+        return "not its first migration"
+    return None
 
 
 # ---- costs (pure) ----------------------------------------------------------
@@ -188,21 +246,41 @@ def strategies(ctx: Ctx) -> list[dict[str, Any]]:
 
 
 def started_at(ctx: Ctx, now: float) -> float:
-    """When paper trading began. Graduations before this are never traded."""
+    """When the current rules version began. Graduations before this are never traded."""
     if ctx.shadow_started_at is None:
-        saved = ctx.store.meta(START_KEY)
+        store, version = ctx.store, ctx.cfg["shadow"]["rules_version"]
+        if store.meta(START_KEY) is None:
+            store.set_meta(START_KEY, str(now))
+        key, mark = VERSION_START_KEY.format(version), fingerprint(strategies(ctx), ctx.cfg["shadow"])
+        saved = store.meta(key)
         if saved is None:
-            ctx.store.set_meta(START_KEY, str(now))
-        ctx.shadow_started_at = float(saved) if saved else now
+            # The first version began when paper trading did; later ones begin when first used.
+            saved = store.meta(START_KEY) if version == 1 else str(now)
+            store.set_meta(key, saved)
+            store.set_meta(FINGERPRINT_KEY.format(version), mark)
+            log.info("shadow bot: rules version %s starts now", version)
+        elif store.meta(FINGERPRINT_KEY.format(version)) not in (None, mark):
+            log.warning("shadow bot: the strategy files or shadow settings changed but rules_version is still %s; "
+                        "bump it in config/settings.yaml so old and new trades are not mixed", version)
+        ctx.shadow_started_at = float(saved)
     return ctx.shadow_started_at
 
 
-def _new_signals(ctx: Ctx, row: Mapping[str, Any], price: float, now: float, have: set[str]) -> int:
+def _new_signals(ctx: Ctx, row: Mapping[str, Any], snap: Mapping[str, Any], now: float, have: set[str]) -> int:
     """Open a pending trade for each strategy whose signal this price is. Returns how many."""
     cfg, migrated, made = ctx.cfg["shadow"], row["migrated_at"], 0
-    for strategy in strategies(ctx):
-        if strategy["id"] in have:
-            continue
+    wanted = [s for s in strategies(ctx) if s["id"] not in have]
+    if not wanted:
+        return 0
+    problem = not_a_graduation(ctx, row)
+    if problem:
+        if row["mint"] not in ctx.shadow_skipped:
+            ctx.shadow_skipped.add(row["mint"])
+            ctx.shadow_counts["not_graduations"] += 1
+            log.info("shadow bot: not trading %s (%s): %s", row.get("symbol"), row["mint"], problem)
+        return 0
+    price, saw = snap["price_usd"], seen(row, snap, now, cfg, ctx.sol_price_usd)
+    for strategy in wanted:
         if strategy["signal"] == "migration":
             # The graduation is the signal. If this first price comes too late to be the entry, there is no trade.
             signal_ts = migrated
@@ -217,31 +295,39 @@ def _new_signals(ctx: Ctx, row: Mapping[str, Any], price: float, now: float, hav
         ctx.store.add_paper_trade(
             strategy=strategy["id"], lane=strategy["lane"], mint=row["mint"], status="pending",
             signal_ts=signal_ts, signal_price=price, migrated_at=migrated, size_sol=strategy["size_sol"],
+            rules_version=cfg["rules_version"], signal_json=saw,
         )
         ctx.shadow_counts["signals"] += 1
         made += 1
     return made
 
 
-def _fail(ctx: Ctx, trade: dict[str, Any], now: float, reason: str) -> None:
+def _fail(ctx: Ctx, trade: dict[str, Any], now: float, reason: str, saw: str | None = None) -> None:
     trade.update(status="failed", closed_at=now, exit_reason=reason)
-    ctx.store.update_paper_trade(trade["id"], status="failed", closed_at=now, exit_reason=reason)
+    ctx.store.update_paper_trade(trade["id"], status="failed", closed_at=now, exit_reason=reason, entry_json=saw)
     ctx.shadow_counts["failed"] += 1
 
 
-def _enter(ctx: Ctx, trade: dict[str, Any], strategy: Mapping[str, Any], snap: Mapping[str, Any], now: float) -> None:
+def _enter(ctx: Ctx, trade: dict[str, Any], strategy: Mapping[str, Any], row: Mapping[str, Any], snap: Mapping[str, Any], now: float) -> None:
     cfg = ctx.cfg["shadow"]
+    limits = cfg["entry_limits"]
     due = max(trade["signal_ts"], trade["migrated_at"] + strategy["min_after_s"])
     if now <= trade["signal_ts"] or now < due:
         return  # still waiting for the next price
+    saw = seen(row, snap, now, cfg, ctx.sol_price_usd)
     if now > due + cfg["max_entry_wait_s"]:
-        return _fail(ctx, trade, now, "no price in time")
-    if unlucky(f"entry|{trade['strategy']}|{trade['mint']}", cfg["entry_fail_pct"]):
-        return _fail(ctx, trade, now, "entry did not land")
+        return _fail(ctx, trade, now, "no price in time", saw)
+    if snap.get("dex_id") not in limits["dex_ids"] or snap.get("quote_mint") != SOL_MINT:
+        return _fail(ctx, trade, now, "not the launchpad pool", saw)
     fill = buy(trade["size_sol"], snap["price_usd"], snap.get("liquidity_usd"), snap.get("mcap"), ctx.sol_price_usd, cfg)
     if fill is None:
-        return _fail(ctx, trade, now, "no pool to buy from")
+        return _fail(ctx, trade, now, "no pool to buy from", saw)
+    if snap["liquidity_usd"] < limits["min_liquidity_usd"] or fill["impact_pct"] > limits["max_impact_pct"]:
+        return _fail(ctx, trade, now, "slippage limit", saw)
+    if unlucky(f"entry|{trade['strategy']}|{trade['mint']}", cfg["entry_fail_pct"]):
+        return _fail(ctx, trade, now, "entry did not land", saw)
     changes = dict(
+        entry_json=saw,
         status="open", entry_ts=now, entry_price=snap["price_usd"], tokens=fill["tokens"], tokens_left=fill["tokens"],
         cost_sol=fill["sol"], fees_sol=fill["fees_sol"], peak_price=snap["price_usd"], last_price=snap["price_usd"], last_ts=now,
     )
@@ -317,14 +403,14 @@ def on_snapshot(ctx: Ctx, row: dict[str, Any], snap: Mapping[str, Any], now: flo
         return  # graduated before paper trading began, and nothing open on it
     by_id = {s["id"]: s for s in strategies(ctx)}
     trades = ctx.store.paper_trades_for(row["mint"])
-    if migrated >= started_at(ctx, now) and _new_signals(ctx, row, snap["price_usd"], now, {t["strategy"] for t in trades}):
+    if migrated >= started_at(ctx, now) and _new_signals(ctx, row, snap, now, {t["strategy"] for t in trades}):
         trades = ctx.store.paper_trades_for(row["mint"])
     for trade in trades:
         strategy = by_id.get(trade["strategy"])
         if strategy is None or trade["status"] not in ACTIVE:
             continue  # a strategy file that was removed leaves its open trades frozen
         if trade["status"] == "pending":
-            _enter(ctx, trade, strategy, snap, now)
+            _enter(ctx, trade, strategy, row, snap, now)
         else:
             _manage(ctx, trade, strategy, snap, now)
     _set_refresh(ctx, row, trades, now)
@@ -430,19 +516,31 @@ def gate(summary: Mapping[str, Any], days: float, cfg: Mapping[str, Any]) -> dic
 
 
 def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], now: float) -> dict[str, Any]:
-    """Everything the Shadow Bot page shows."""
-    shadow = cfg["shadow"]
-    row = db.execute("SELECT value FROM meta WHERE key = ?", (START_KEY,)).fetchone()
-    start = float(row[0]) if row else None
+    """Everything the Shadow Bot page shows.
+
+    The headline numbers, the equity curve and the gate count only trades made under the
+    current rules version that were watched throughout. Trades affected by an outage and
+    trades from earlier versions are reported next to them, never mixed in.
+    """
+    shadow, version = cfg["shadow"], cfg["shadow"]["rules_version"]
+
+    def meta(key: str) -> str | None:
+        row = db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    first = float(meta(START_KEY)) if meta(START_KEY) else None
+    start = meta(VERSION_START_KEY.format(version))
+    start = float(start) if start else None       # None until the app has run with this version
     days = (now - start) / 86400 if start else 0.0
+    saved_mark = meta(FINGERPRINT_KEY.format(version))
     out = []
     for spec in specs:
         cur = db.execute("SELECT * FROM paper_trades WHERE strategy = ?", (spec["id"],))
         columns = [c[0] for c in cur.description]   # works whatever row type the connection returns
-        trades = [dict(zip(columns, r)) for r in cur]
-        for t in trades:
+        every = [dict(zip(columns, r)) for r in cur]
+        for t in every:
             t["affected"] = affected(t, shadow["outage_gap_s"], now)
-        # The headline numbers, the curve and the gate use only trades that were watched throughout.
+        trades = [t for t in every if t["rules_version"] == version]
         summary = summarise([t for t in trades if not t["affected"]])
         hit = summarise([t for t in trades if t["affected"]])
         everything = summarise(trades)
@@ -455,17 +553,25 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
                 "SELECT trade_id, sol_usd FROM paper_fills WHERE side = 'buy' AND trade_id IN (%s)" % ",".join("?" * len(opened)),
                 [t["id"] for t in opened])}
             marked = sum(t["proceeds_sol"] + t["tokens_left"] * t["last_price"] / fills[t["id"]] - t["cost_sol"] for t in opened if fills.get(t["id"]))
-        recent = sorted((t for t in trades if t["status"] in ("closed", "open")), key=lambda t: t["closed_at"] or t["entry_ts"], reverse=True)[:15]
+        earlier = []
+        for old in sorted({t["rules_version"] for t in every} - {version}):
+            old_trades = [t for t in every if t["rules_version"] == old]
+            old_summary = summarise(old_trades)
+            earlier.append({"version": old, "open": sum(1 for t in old_trades if t["status"] == "open"),
+                            **{k: old_summary[k] for k in ("trades", "hit_rate_pct", "median_return_pct", "mean_return_pct", "profit_sol")}})
+        recent = sorted((t for t in every if t["status"] in ("closed", "open")), key=lambda t: t["closed_at"] or t["entry_ts"], reverse=True)[:15]
         out.append({
             "id": spec["id"], "name": spec["name"], "description": spec["description"], "lane": spec["lane"], "size_sol": spec["size_sol"],
             **{k: v for k, v in summary.items() if k != "ranked"},
             "open": len(opened), "open_marked_sol": marked, "open_affected": sum(1 for t in opened if t["affected"]),
             "affected": {k: hit[k] for k in ("trades", "wins", "hit_rate_pct", "median_return_pct", "mean_return_pct", "profit_sol", "exits")},
             "all": {k: everything[k] for k in ("trades", "profit_sol")},
+            "earlier": earlier,
             "pending": sum(1 for t in trades if t["status"] == "pending"),
             "failed": {reason: sum(1 for t in failed if t["exit_reason"] == reason) for reason in sorted({t["exit_reason"] for t in failed})},
             "gate": gate(summary, days, shadow["gate"]),
-            "recent": [{k: t[k] for k in ("mint", "status", "entry_ts", "entry_price", "closed_at", "exit_reason", "pnl_sol", "return_pct", "last_price", "affected", "max_gap_s")} for t in recent],
+            "recent": [{k: t[k] for k in ("mint", "status", "entry_ts", "entry_price", "closed_at", "exit_reason", "pnl_sol", "return_pct",
+                                          "last_price", "affected", "max_gap_s", "rules_version")} for t in recent],
         })
     names = {r[0]: (r[1], r[2]) for r in db.execute(
         "SELECT mint, symbol, name FROM tokens WHERE mint IN (SELECT mint FROM paper_trades WHERE status IN ('open', 'closed'))")}
@@ -473,12 +579,16 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
         for t in strategy["recent"]:
             t["symbol"], t["name"] = names.get(t["mint"], (None, None))
     return {
-        "enabled": shadow["enabled"], "started_at": start, "days": days, "now": now, "strategies": out,
+        "enabled": shadow["enabled"], "started_at": start, "first_started_at": first, "days": days, "now": now, "strategies": out,
+        "rules_version": version,
+        # The strategy files or settings changed, but the version number did not: old and new trades are mixed.
+        "rules_changed_unversioned": saved_mark is not None and saved_mark != fingerprint(specs, shadow),
         "assumptions": {
             "priority_fee_sol": shadow["fees"]["priority_fee_sol"] + shadow["fees"]["network_fee_sol"],
             "fee_range_pct": [min(p for _, p in shadow["fees"]["pumpswap_tiers"]), max(p for _, p in shadow["fees"]["pumpswap_tiers"])],
             "impact_multiplier": shadow["slippage"]["impact_multiplier"], "extra_pct": shadow["slippage"]["extra_pct"],
             "entry_fail_pct": shadow["entry_fail_pct"], "exit_late_pct": shadow["exit_late_pct"],
             "refresh": shadow["refresh"], "gate": shadow["gate"], "outage_gap_s": shadow["outage_gap_s"],
+            "entry_limits": shadow["entry_limits"],
         },
     }

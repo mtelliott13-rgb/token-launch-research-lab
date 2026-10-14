@@ -17,8 +17,8 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`), Shadow Bot (`/shadow`).
 
-**A restart is pending** for the "affected by outage" split on the Shadow Bot page (built
-2026-10-13). Everything else below, including the shadow bot, has been live since the restart
+**A restart is pending** for the "affected by outage" split and for shadow bot rules version 2
+(both built 2026-10-13). Everything else below, including the shadow bot, has been live since the restart
 on 2026-10-13 at 15:32.
 
 ## What exists
@@ -40,7 +40,7 @@ on 2026-10-13 at 15:32.
 | Stall watchdog and sleep detection | 2026-10-11 | `radar/collectors/pumpportal.py` |
 | Shadow bot, Lane B (paper trades) | 2026-10-13 | `radar/lab/shadow.py`, `strategies/`, `static/shadow.html` |
 
-146 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
+153 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
 trades, signs or holds keys: the shadow bot only writes rows to the database.
 
 ## When each page will have enough data
@@ -264,6 +264,30 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
   curve and the gate. Nothing is deleted: the flag comes from `paper_trades.max_gap_s`, and the
   page also shows all trades together. Caveat: long-running trades meet outages more often than
   quick stop-outs, so leaving them out under-counts long holds, which include most big winners.
+- **Rules version 2 (2026-10-13, needs the restart).** After the first review:
+  - *Slippage limit:* no entry when the pool holds under $5,000 or the modelled price impact is
+    over 10%; recorded as failed, reason "slippage limit" (`shadow.entry_limits`).
+  - *Real graduations only.* PumpPortal sends "migrate" whenever anyone opens a PumpSwap pool
+    for any token. That is how USDC, WBTC, IBM, tOpenAI, ROOT, SAPCAT and PSOL were "graduating",
+    some of them many times; their prices then came from their big Orca, Raydium or Meteora
+    pools. A token is now traded only if we watched it launch on pump.fun's bonding curve, this
+    is its first migration, and it is not on the Rising exclusion list; and the entry price must
+    come from the PumpSwap pool quoted in SOL (else failed, "not the launchpad pool"). This
+    also drops real graduations whose launch we missed (38 of the first 88 entries), mostly
+    because the Mac was asleep at launch.
+  - *The $1 to $100 pools* were real pump.fun tokens in Mayhem Mode: all 9 whose launch we saw
+    had `is_mayhem_mode` set, and they reached PumpSwap at a market cap of a few dollars. Why
+    Mayhem Mode tokens migrate like that was not researched. The slippage limit stops them;
+    Mayhem Mode itself is not excluded, and is saved with each trade.
+  - *Rules version:* every trade carries `rules_version` (`shadow.rules_version`, now 2; the
+    first 186 trades are version 1). The page's headline numbers, curve and gate count only the
+    current version, from when it began; earlier versions have their own table. Bump the number
+    whenever a strategy file or a shadow setting changes; the page warns if you forget.
+  - *Entry-time values:* `signal_json` and `entry_json` on each trade hold exactly what the
+    engine saw (safety, on-chain authority, bot flag, Rising, score, pool, volumes). The export
+    uses them and marks each row "saved" or "rebuilt".
+- **Export:** `uv run python -m radar.lab.export` writes `data/exports/paper_trades_<time>.csv`,
+  `open_positions_<time>.csv` and a README. Read-only.
 - **Not built:** Lane A (needs trade data), several latencies (we only have one: the next
   price), deployer reputation, risk exits on creator or early-buyer selling.
 

@@ -86,6 +86,7 @@ def parse_pair(pair: dict[str, Any]) -> dict[str, Any]:
         "boosts_active": boosts,
         "dex_id": clean_text(pair.get("dexId"), 40),
         "pair_address": pair.get("pairAddress") if is_mint(pair.get("pairAddress")) else None,
+        "quote_mint": (pair.get("quoteToken") or {}).get("address"),
     }
 
 

@@ -49,4 +49,8 @@ class Ctx:
     # trading began, and what has happened since the app started.
     shadow_strategies: list[dict[str, Any]] | None = None
     shadow_started_at: float | None = None
-    shadow_counts: dict[str, int] = field(default_factory=lambda: {"signals": 0, "entered": 0, "failed": 0, "closed": 0})
+    shadow_counts: dict[str, int] = field(
+        default_factory=lambda: {"signals": 0, "entered": 0, "failed": 0, "closed": 0, "not_graduations": 0}
+    )
+    # "Migrations" we refused to trade because they were not real pump.fun graduations (logged once each).
+    shadow_skipped: set[str] = field(default_factory=set)

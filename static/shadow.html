@@ -146,6 +146,15 @@
     <div class="body"><div class="note" id="aff-note"></div></div>
   </section>
 
+  <section id="old-section" hidden>
+    <div class="head"><h2>Earlier rules versions</h2><span class="sub">trades made before the rules last changed: not in any figure above, and not in the gate</span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Strategy</th><th class="num">Rules version</th><th class="num">Closed trades</th><th class="num">Hit rate</th><th class="num">Median return</th><th class="num">Mean return</th><th class="num">Profit</th><th class="num" title="Positions opened under that version and still running. They are sold by the usual exit rules.">Still open</th></tr></thead>
+      <tbody id="old"></tbody>
+    </table></div>
+    <div class="body"><div class="note">Results from different rules cannot be added together. Version 1 bought into pools with a few dollars in them and treated any new PumpSwap pool as a graduation, including pools for USDC and wrapped assets.</div></div>
+  </section>
+
   <section>
     <div class="head"><h2>Equity curve</h2><span class="sub">running profit of closed trades that were watched throughout, in SOL, after all costs</span></div>
     <div class="body">
@@ -163,7 +172,7 @@
   <section>
     <div class="head"><h2>How trades ended</h2><span class="sub">closed trades by the rule that sold them, and entries that never happened</span></div>
     <div class="wrap"><table>
-      <thead><tr><th>Strategy</th><th class="num">Hard stop</th><th class="num">Trailing stop</th><th class="num">Time stop</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit first</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">Price vanished</th><th class="num" title="Simulated dropped transaction">Entry dropped</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">No entry price</th><th class="num">Waiting</th><th class="num">Fees paid</th></tr></thead>
+      <thead><tr><th>Strategy</th><th class="num" title="Sold by the hard stop">Hard stop</th><th class="num" title="Sold by the trailing stop">Trailing</th><th class="num" title="Sold at the 24-hour time limit">Time stop</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">No price</th><th class="num" title="Entry skipped: the pool was too small, or the trade would have moved the price too far">Slippage</th><th class="num" title="Entry skipped: the price did not come from the launchpad's own pool, quoted in SOL">Wrong pool</th><th class="num" title="Simulated dropped transaction">Dropped</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">Too late</th><th class="num">Waiting</th><th class="num">Fees</th></tr></thead>
       <tbody id="ends"></tbody>
     </table></div>
   </section>
@@ -281,10 +290,17 @@ function render(d) {
     x.affected = x.affected || { trades: 0, wins: 0, hit_rate_pct: null, median_return_pct: null, mean_return_pct: null, profit_sol: 0 };
     x.all = x.all || { trades: x.trades, profit_sol: x.profit_sol };
     x.open_affected = x.open_affected || 0;
+    x.earlier = x.earlier || [];
   }
-  $("banner-text").textContent = d.started_at == null
-    ? "No wallet, no keys, no orders. Paper trading starts with the first graduation seen after the app is restarted."
-    : `No wallet, no keys, no orders. Every trade here is a row in the database. Paper trading began ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days ago); only tokens that graduated after that are traded.`;
+  const versioned = d.rules_version != null, limits = A.entry_limits;
+  const base = "No wallet, no keys, no orders. Every trade here is a row in the database.";
+  $("banner-text").replaceChildren(...[
+    h("div", null, !versioned
+      ? (d.started_at == null ? `${base} Paper trading starts with the first graduation seen after the app is restarted.` : `${base} Paper trading began ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days ago).`)
+      : d.started_at == null
+        ? `${base} Rules version ${d.rules_version} has not traded yet: it starts with the first graduation seen after the restart.`
+        : `${base} These figures are for rules version ${d.rules_version}, in use since ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days). Only tokens that graduated after that are traded, and trades made under earlier versions are listed separately below.`),
+    d.rules_changed_unversioned ? h("div", { style: "margin-top:6px" }, h("span", { class: "mark warn" }, "▲ "), `A strategy file or a shadow setting has changed since version ${d.rules_version} began, but the version number was not raised, so trades made under different rules are being counted together. Raise rules_version in config/settings.yaml and restart.`) : null].filter(Boolean));
   $("cmp-sub").textContent = `${list.length} strategies from the strategies/ folder, ${list[0] ? list[0].size_sol : 0.5} SOL per trade`;
   $("cmp").replaceChildren(...list.map((x, i) => h("tr", null,
     h("td", { class: "what" }, h("div", null, swatch(i), x.name), h("div", { class: "desc" }, x.description)),
@@ -310,18 +326,26 @@ function render(d) {
     num(x.all.trades ? fmtSol(x.all.profit_sol) : DASH, sign(x.all.trades ? x.all.profit_sol : null))); }));
   $("aff-note").textContent = stale ? "Restart the collector to fill this table: the running one was started before trades were split this way, so for now every trade is counted above." : `While the computer sleeps or the app is off, no price is fetched and no stop can fire, so these results say more about the outage than about the strategy. Leaving them out is not neutral, though: a trade that runs for hours is more likely to meet an outage than one stopped out in minutes, so long-running trades (which include most big winners) are under-counted above. If the share in this table is large, treat every number on this page with suspicion.`;
   $("cmp-note").textContent = "Only trades that were watched throughout are counted here. Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: meme returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
+  const old = list.flatMap((x, i) => x.earlier.map((e) => h("tr", null,
+    h("td", { style: "white-space:nowrap" }, swatch(i), x.name), num(e.version), num(fmtInt(e.trades)),
+    num(e.hit_rate_pct == null ? DASH : e.hit_rate_pct.toFixed(1) + "%"),
+    num(fmtPct(e.median_return_pct), sign(e.median_return_pct)), num(fmtPct(e.mean_return_pct), sign(e.mean_return_pct)),
+    num(e.trades ? fmtSol(e.profit_sol) : DASH, sign(e.trades ? e.profit_sol : null)), num(fmtInt(e.open)))));
+  $("old-section").hidden = !old.length;
+  $("old").replaceChildren(...old);
   $("legend").replaceChildren(...list.map((x, i) => h("span", null, swatch(i), x.name)));
   drawChart(d);
 
   $("gates").replaceChildren(...list.map((x, i) => h("div", { class: "tile" },
     h("h3", null, swatch(i), x.name), gateChip(x.gate),
     h("ul", null, x.gate.checks.map((c) => h("li", null, h("span", { class: "mark " + (c.ok ? "ok" : "crit") }, c.ok ? MARKS.ok : MARKS.crit), h("span", null, c.name), h("span", { class: "have" }, c.have)))))));
-  $("gate-note").textContent = `Trades affected by an outage are left out of every line. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
+  $("gate-note").textContent = `Only trades made under the current rules version count, and the days are counted from when it began. Trades affected by an outage are left out of every line. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
 
   const count = (o, k) => fmtInt(o[k] || 0);
   $("ends").replaceChildren(...list.map((x, i) => h("tr", null,
     h("td", { style: "white-space:nowrap" }, swatch(i), x.name),
     num(count(x.exits, "hard_stop")), num(count(x.exits, "trailing_stop")), num(count(x.exits, "time_stop")), num(fmtInt(x.took_profit)), num(count(x.exits, "no_price")),
+    num(count(x.failed, "slippage limit")), num(count(x.failed, "not the launchpad pool")),
     num(count(x.failed, "entry did not land")), num(fmtInt((x.failed["no price in time"] || 0) + (x.failed["no pool to buy from"] || 0))), num(fmtInt(x.pending)),
     num(x.trades ? x.fees_sol.toFixed(3) + " SOL" : DASH))));
 
@@ -332,11 +356,14 @@ function render(d) {
     h("td", null, swatch(t.i), t.strategy),
     h("td", null, h("a", { href: `https://dexscreener.com/solana/${t.mint}`, target: "_blank", rel: "noopener noreferrer" }, t.symbol || t.mint.slice(0, 6)), " ", h("span", { class: "muted" }, t.name || "")),
     h("td", null, t.status === "open" ? "open" : "sold: " + (REASONS[t.exit_reason] || t.exit_reason),
+      versioned && t.rules_version !== d.rules_version ? h("span", { class: "gate", style: "margin-left:8px", title: "Made under an earlier version of the rules; not counted above" }, `rules v${t.rules_version}`) : null,
       t.affected ? h("span", { class: "gate", style: "margin-left:8px", title: `Went ${Math.round(Math.max(t.max_gap_s || 0, A.outage_gap_s) / 60)} minutes or more without a price while open` }, h("span", { class: "mark warn" }, "▲"), "affected by outage") : null),
     num(t.status === "open" ? DASH : fmtPct(t.return_pct), sign(t.return_pct)),
     num(t.status === "open" ? DASH : fmtSol(t.pnl_sol), sign(t.pnl_sol)))));
 
   $("assume").replaceChildren(h("ul", { style: "margin:0;padding-left:18px;color:var(--ink2)" },
+    h("li", null, "Only real pump.fun graduations are traded: a token we watched launch on the bonding curve, migrating for the first time, and not on the exclusion list of stablecoins and major tokens. PumpPortal's \"migrate\" message alone is not enough, because anyone can open a PumpSwap pool for any token."),
+    limits ? h("li", null, `Slippage limit: no entry when the pool holds less than $${fmtInt(limits.min_liquidity_usd)} or the trade would move the price by more than ${limits.max_impact_pct}% (as modelled below). The entry is recorded as failed. The price must come from the launchpad's own pool, quoted in SOL.`) : null,
     h("li", null, "Entry and exit happen at the next price after a signal or a stop, never at the price that triggered it. A stop set at −40% is filled wherever the price has fallen to by then."),
     h("li", null, `PumpSwap's trading fee is charged on the way in and on the way out: ${A.fee_range_pct[1]}% for a small token, falling to ${A.fee_range_pct[0]}% for the largest (pump.fun's published table).`),
     h("li", null, `Each transaction also pays ${A.priority_fee_sol} SOL in priority and network fees.`),

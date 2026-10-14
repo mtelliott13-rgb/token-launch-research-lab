@@ -306,6 +306,9 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     exit_skip       INTEGER NOT NULL DEFAULT 0, -- prices to let pass first (a late exit)
     misses          INTEGER NOT NULL DEFAULT 0, -- lookups in a row that found no price
     max_gap_s       REAL NOT NULL DEFAULT 0,    -- longest wait between two prices while open (sleep, outage)
+    rules_version   INTEGER NOT NULL DEFAULT 1, -- shadow.rules_version when the signal fired
+    signal_json     TEXT,              -- what the engine saw about the token at the signal
+    entry_json      TEXT,              -- and at the entry (or at the moment the entry failed)
     last_price      REAL,
     last_ts         REAL,
     closed_at       REAL,

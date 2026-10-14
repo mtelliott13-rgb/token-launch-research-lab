@@ -80,18 +80,25 @@ def test_exit_rules_in_order():
     assert shadow.exit_rule(rest, spec, 2.0, T0 + 60) == ("trailing_stop", 0.5)
 
 
-def snap(price, liquidity=40_000.0):
-    return {"price_usd": price, "liquidity_usd": liquidity, "mcap": price * 1e9}
+SOL = "So11111111111111111111111111111111111111112"
+# A token we watched launch on pump.fun's bonding curve.
+LAUNCHED = {"source": "pumpportal", "launchpad": "pump.fun", "bonding_curve": "Curve1111", "created_at": T0 - 3600, "initial_mcap_sol": 28.0}
 
 
-def engine(steps, *, row_extra=None, cfg=None):
+def snap(price, liquidity=40_000.0, dex="pumpswap", quote=SOL):
+    return {"price_usd": price, "liquidity_usd": liquidity, "mcap": price * 1e9, "dex_id": dex, "quote_mint": quote}
+
+
+def engine(steps, *, row_extra=None, cfg=None, migrations=1):
     """Feed (seconds after graduation, price or None for 'no price') to the engine. Returns (trades by strategy, fills, row)."""
     async def flow(ctx):
         ctx.cfg["shadow"] |= {"entry_fail_pct": 0, "exit_late_pct": 0, **(cfg or {})}
         ctx.sol_price_usd = 100.0
-        ctx.store.set_meta(shadow.START_KEY, str(T0 - 10))
+        ctx.shadow_started_at = T0 - 10
         ctx.store.upsert_token(MINT, source="pumpportal", first_seen_at=T0 - 3600, created_at=T0 - 3600, name="Paper")
-        row = {"mint": MINT, "migrated_at": T0, "paper_refresh_s": None, **(row_extra or {})}
+        for _ in range(migrations):
+            ctx.store.add_migration(MINT, T0, "pump-amm", "sig")
+        row = {"mint": MINT, "migrated_at": T0, "paper_refresh_s": None, **LAUNCHED, **(row_extra or {})}
         for after, price, *more in steps:
             row.update(more[0] if more else {})
             with ctx.store.tx():
@@ -231,10 +238,12 @@ def test_report_for_the_page():
         ctx.cfg["shadow"] |= {"entry_fail_pct": 0, "exit_late_pct": 0}
         ctx.sol_price_usd = 100.0
         ctx.store.set_meta(shadow.START_KEY, str(T0 - 86400))
+        ctx.store.set_meta(shadow.VERSION_START_KEY.format(ctx.cfg["shadow"]["rules_version"]), str(T0 - 86400))
         for n, prices in enumerate([[1.0, 0.5, 0.4], [1.0, 1.2]]):
             mint = f"{MINT[:-1]}{n}"
             ctx.store.upsert_token(mint, source="pumpportal", first_seen_at=T0, created_at=T0, name=f"Paper {n}", symbol=f"P{n}")
-            row = {"mint": mint, "migrated_at": T0, "paper_refresh_s": None}
+            ctx.store.add_migration(mint, T0, "pump-amm", "sig")
+            row = {"mint": mint, "migrated_at": T0, "paper_refresh_s": None, **LAUNCHED}
             for i, price in enumerate(prices):
                 shadow.on_snapshot(ctx, row, snap(price), T0 + 125 + 30 * i)
         return shadow.report(ctx.store.db, ctx.cfg, shadow.strategies(ctx), T0 + 400)
@@ -266,9 +275,9 @@ def test_the_page_report_reads_a_database_file_on_its_own_connection(tmp_path):
     from radar.lab import stats
 
     store = Store(tmp_path / "radar.db")
-    store.set_meta(shadow.START_KEY, str(T0))
+    store.set_meta(shadow.VERSION_START_KEY.format(CFG["shadow"]["rules_version"]), str(T0))
     store.upsert_token(MINT, source="pumpportal", first_seen_at=T0, created_at=T0, symbol="PAPER")
-    store.add_paper_trade(strategy="every_graduation", lane="B", mint=MINT, status="closed", signal_ts=T0, size_sol=0.5,
+    store.add_paper_trade(rules_version=CFG["shadow"]["rules_version"], strategy="every_graduation", lane="B", mint=MINT, status="closed", signal_ts=T0, size_sol=0.5,
                           closed_at=T0 + 60, pnl_sol=0.1, return_pct=20.0, fees_sol=0.01, exit_reason="trailing_stop")
     store.db.commit()
     report = stats.shadow_from(store, CFG, shadow.load_strategies(), T0 + 3600)
@@ -279,7 +288,7 @@ def test_the_page_report_reads_a_database_file_on_its_own_connection(tmp_path):
 def test_trades_affected_by_an_outage_are_reported_apart_and_kept_out_of_the_gate():
     async def flow(ctx):
         store = ctx.store
-        store.set_meta(shadow.START_KEY, str(T0 - 30 * 86400))
+        store.set_meta(shadow.VERSION_START_KEY.format(ctx.cfg["shadow"]["rules_version"]), str(T0 - 30 * 86400))
         n = 0
 
         def add(pnl, gap, status="closed"):
@@ -287,7 +296,7 @@ def test_trades_affected_by_an_outage_are_reported_apart_and_kept_out_of_the_gat
             n += 1
             mint = f"M{n}"
             store.upsert_token(mint, source="pumpportal", first_seen_at=T0, created_at=T0, symbol=mint)
-            store.add_paper_trade(strategy="every_graduation", lane="B", mint=mint, status=status, signal_ts=T0, size_sol=0.5,
+            store.add_paper_trade(rules_version=CFG["shadow"]["rules_version"], strategy="every_graduation", lane="B", mint=mint, status=status, signal_ts=T0, size_sol=0.5,
                                   entry_ts=T0, closed_at=T0 + n if status == "closed" else None, pnl_sol=pnl, return_pct=200 * pnl if pnl is not None else None,
                                   fees_sol=0.01, exit_reason="hard_stop" if status == "closed" else None, max_gap_s=gap, last_ts=T0 + 990,
                                   proceeds_sol=0, cost_sol=0.501, tokens=1.0, tokens_left=1.0, last_price=1.0)
@@ -353,3 +362,127 @@ def test_export_writes_every_trade_with_what_was_known_at_entry(tmp_path):
     (position,) = list(csv.DictReader(open(open_path)))
     assert position["mint"] == "B" and position["price_multiple_now"] == "1.5" and position["share_still_held"] == "1.0"
     assert float(position["pnl_now_before_costs_sol"]) == pytest.approx(24 * 3.0 / 100 - 0.501) and position["affected_by_outage"] == "no"
+
+
+def test_entries_into_thin_pools_are_skipped_as_slippage_limit():
+    assert SHADOW["entry_limits"]["min_liquidity_usd"] == 5000 and SHADOW["entry_limits"]["max_impact_pct"] == 10
+    trades, fills, row = engine([(125, snap(1.0, liquidity=4_999.0)), (150, snap(1.1, liquidity=60_000.0))])
+    t = trades["every_graduation"]
+    assert (t["status"], t["exit_reason"]) == ("failed", "slippage limit") and fills == [] and row["paper_refresh_s"] is None
+    trades, _, _ = engine([(125, snap(1.0, liquidity=5_000.0))])
+    assert trades["every_graduation"]["status"] == "open"
+    # The price-impact limit on its own: a $2,000 pool would move about 11.7% (as modelled) for 0.5 SOL.
+    loose = {"entry_limits": {**SHADOW["entry_limits"], "min_liquidity_usd": 0}}
+    trades, _, _ = engine([(125, snap(1.0, liquidity=2_000.0))], cfg=loose)
+    assert trades["every_graduation"]["exit_reason"] == "slippage limit"
+    trades, _, _ = engine([(125, snap(1.0, liquidity=3_000.0))], cfg=loose)
+    assert trades["every_graduation"]["status"] == "open"
+
+
+def test_only_the_launchpads_own_sol_pool_is_traded():
+    for bad in (snap(1.0, dex="orca"), snap(1.0, quote="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), {"price_usd": 1.0, "liquidity_usd": 9e5, "mcap": 1e9}):
+        trades, fills, _ = engine([(125, bad), (150, snap(1.0))])
+        assert trades["every_graduation"]["exit_reason"] == "not the launchpad pool" and fills == []
+
+
+def test_a_migrate_message_alone_does_not_make_a_graduation():
+    """PumpPortal says "migrate" whenever anyone opens a PumpSwap pool for any token, USDC included."""
+    prices = [(125, 1.00, SAFE), (150, 1.10), (175, 1.20)]
+    usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    assert usdc in CFG["rising"]["exclude_mints"]
+    not_ours = [
+        {"bonding_curve": None, "initial_mcap_sol": None},        # never saw it launch (e.g. WBTC, or launched while we slept)
+        {"launchpad": "bonk"},                                    # another launchpad's token
+        {"source": "dexscreener"},
+        {"created_at": T0},                                       # first seen at the "migration" itself
+        {"created_at": None},
+    ]
+    for extra in not_ours:
+        assert engine(prices, row_extra=extra)[0] == {}
+    assert engine(prices, migrations=2)[0] == {}                  # pools opened again and again for the same token
+    assert engine(prices, migrations=0)[0] == {}                  # no migration on record at all
+    assert set(engine(prices)[0]) == {"every_graduation", "safety_only"}
+
+    async def excluded(ctx):
+        ctx.shadow_started_at = T0 - 10
+        ctx.sol_price_usd = 100.0
+        ctx.store.upsert_token(usdc, source="pumpportal", first_seen_at=T0 - 3600, created_at=T0 - 3600)
+        ctx.store.add_migration(usdc, T0, "pump-amm", "sig")
+        row = {"mint": usdc, "migrated_at": T0, "paper_refresh_s": None, **LAUNCHED}
+        for after in (125, 150, 175):
+            shadow.on_snapshot(ctx, row, snap(1.0), T0 + after)
+        return ctx.store.paper_trades_for(usdc), ctx.shadow_counts["not_graduations"]
+
+    assert run(lambda request: None, excluded)[0] == ([], 1)      # refused, and counted once, not once per price
+
+
+def test_each_trade_carries_its_rules_version_and_what_the_engine_saw():
+    import json
+
+    rising = {"score": 0.8, "rising_seen_at": T0 + 195}
+    trades, _, _ = engine([(125, 1.00), (200, 1.10, {**SAFE, **rising, "top_holder_pct": 4.0, "total_holders": 321, "mayhem_mode": 0}),
+                           (230, 1.20, {"top10_pct": 44.0}), (260, snap(1.3, liquidity=100.0))])
+    t = trades["safety_only"]
+    assert {x["rules_version"] for x in trades.values()} == {SHADOW["rules_version"]} and SHADOW["rules_version"] >= 2
+    signal, entry = json.loads(t["signal_json"]), json.loads(t["entry_json"])
+    assert (signal["ts"], signal["price_usd"], signal["top10_pct"], signal["on_rising"], signal["total_holders"]) == (T0 + 200, 1.10, 18.0, True, 321)
+    # By the entry the holder figure had changed and it had left Rising: the entry record shows that, the signal record does not.
+    assert (entry["ts"], entry["price_usd"], entry["top10_pct"], entry["on_rising"]) == (T0 + 230, 1.20, 44.0, False)
+    assert (entry["liquidity_usd"], entry["dex_id"], entry["quote_mint"], entry["chain_mint_authority"], entry["bot_volume"], entry["sol_usd"]) == (40_000.0, "pumpswap", SOL, 0, 0, 100.0)
+    assert entry["seconds_since_graduation"] == 230 and entry["mayhem_mode"] == 0
+    first = json.loads(trades["every_graduation"]["entry_json"])
+    assert first["top10_pct"] is None and first["ts"] == T0 + 125  # nothing was known about safety when it entered
+    # A failed entry keeps what it saw too.
+    trades, _, _ = engine([(125, snap(1.0, liquidity=80.0))])
+    assert json.loads(trades["every_graduation"]["entry_json"])["liquidity_usd"] == 80.0
+
+
+def test_only_the_current_rules_version_counts_and_a_silent_rule_change_is_flagged():
+    async def flow(ctx):
+        store, version = ctx.store, ctx.cfg["shadow"]["rules_version"]
+        store.set_meta(shadow.START_KEY, str(T0 - 40 * 86400))
+        store.upsert_token(MINT, source="pumpportal", first_seen_at=T0, created_at=T0, symbol="P")
+
+        def add(i, pnl, rules_version, status="closed"):
+            store.add_paper_trade(strategy="every_graduation", lane="B", mint=f"M{i}", status=status, signal_ts=T0, size_sol=0.5, entry_ts=T0,
+                                  closed_at=T0 + i if status == "closed" else None, pnl_sol=pnl, return_pct=200 * pnl if pnl is not None else None,
+                                  fees_sol=0.01, exit_reason="hard_stop", rules_version=rules_version, last_ts=T0 + 990, proceeds_sol=0, cost_sol=0.501,
+                                  tokens=1.0, tokens_left=1.0, last_price=1.0)
+
+        for i in range(300):
+            add(i, 0.05, 1)                                     # the old rules looked wonderful
+        add(900, None, 1, "open")
+        for i in range(300, 310):
+            add(i, -0.1, version)
+        before = shadow.report(store.db, ctx.cfg, shadow.strategies(ctx), T0 + 1000)
+        row = {"mint": MINT, "migrated_at": T0 + 500, "paper_refresh_s": None, **LAUNCHED}
+        ctx.sol_price_usd = 100.0
+        shadow.on_snapshot(ctx, row, snap(1.0), T0 + 990)       # first use of this version: its clock starts here
+        started = shadow.report(store.db, ctx.cfg, shadow.strategies(ctx), T0 + 990 + 86400)
+        ctx.cfg["shadow"]["entry_limits"] = {**ctx.cfg["shadow"]["entry_limits"], "min_liquidity_usd": 1}
+        changed = shadow.report(store.db, ctx.cfg, shadow.strategies(ctx), T0 + 990 + 86400)
+        return before, started, changed
+
+    (before, started, changed), _, _ = run(lambda request: None, flow)
+    s = before["strategies"][0]
+    assert s["trades"] == 10 and s["profit_sol"] == pytest.approx(-1.0) and s["gate"]["status"] == "NOT ENOUGH DATA" and s["open"] == 0
+    assert s["earlier"] == [{"version": 1, "open": 1, "trades": 300, "hit_rate_pct": 100.0, "median_return_pct": pytest.approx(10.0),
+                             "mean_return_pct": pytest.approx(10.0), "profit_sol": pytest.approx(15.0)}]
+    assert before["started_at"] is None and before["days"] == 0 and before["rules_version"] == SHADOW["rules_version"]
+    assert started["started_at"] == T0 + 990 and started["days"] == pytest.approx(1.0) and started["first_started_at"] == T0 - 40 * 86400
+    assert started["rules_changed_unversioned"] is False and changed["rules_changed_unversioned"] is True
+
+
+def test_old_databases_get_the_version_column_with_existing_trades_as_version_one(tmp_path):
+    from radar.db.store import Store
+
+    store = Store(tmp_path / "radar.db")
+    for column in ("rules_version", "signal_json", "entry_json"):
+        store.db.execute(f"ALTER TABLE paper_trades DROP COLUMN {column}")
+    store.db.execute("INSERT INTO paper_trades (strategy, lane, mint, status, signal_ts, size_sol) VALUES ('every_graduation', 'B', 'OLD', 'open', 1, 0.5)")
+    store.db.commit()
+    store.close()
+    store = Store(tmp_path / "radar.db")
+    (old,) = store.paper_trades_for("OLD")
+    assert old["rules_version"] == 1 and old["entry_json"] is None
+    store.close()

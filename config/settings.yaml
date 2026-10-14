@@ -194,6 +194,20 @@ shadow:
     pool_share: 0.5
     impact_multiplier: 2.0        # pessimism: count that price move twice
     extra_pct: 1.0                # and lose a further 1% each way to the price moving before we land
+  # Bump this number whenever the rules change (anything in this block, or a file in
+  # strategies/). Every paper trade is tagged with it, and only trades made under the current
+  # number count toward the headline figures and the go / no-go gate.
+  #   1 = first version (2026-10-13)
+  #   2 = slippage limit, real pump.fun graduations only (2026-10-13)
+  rules_version: 2
+  # An entry is skipped, and recorded as failed with the reason "slippage limit", when the pool
+  # is smaller than this or our trade would move the price by more than this (as modelled above).
+  entry_limits:
+    min_liquidity_usd: 5000
+    max_impact_pct: 10
+    # The entry must be priced from the launchpad's own pool, quoted in SOL. Anything else is
+    # recorded as failed with the reason "not the launchpad pool".
+    dex_ids: [pumpswap]
   entry_fail_pct: 10              # this share of entries never lands (dropped transaction); no retry
   exit_late_pct: 10               # this share of exits lands one price later than it should
   max_entry_wait_s: 300           # no price within this long after the entry was due: the entry is void

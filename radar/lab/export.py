@@ -12,6 +12,7 @@ saw, so each such column says where it comes from in data/exports/README.txt.
 from __future__ import annotations
 
 import csv
+import json
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -23,19 +24,19 @@ from radar.lab import shadow
 from radar.scoring.bot_volume import likely_bot_volume
 
 TRADE_COLUMNS = (
-    "trade_id", "strategy", "status", "mint", "symbol", "name",
+    "trade_id", "rules_version", "strategy", "status", "mint", "symbol", "name",
     "migrated_at_utc", "signal_at_utc", "signal_price_usd",
     "entry_at_utc", "seconds_from_graduation_to_entry", "entry_price_usd", "entry_price_paid_usd", "size_sol", "cost_sol",
     "took_profit_at_utc", "took_profit_price_usd",
     "exit_at_utc", "exit_price_usd", "avg_exit_price_usd", "exit_reason", "held_minutes", "peak_price_usd", "peak_multiple",
     "proceeds_sol", "fees_sol", "pnl_sol", "return_pct",
     "affected_by_outage", "longest_gap_without_price_s",
-    "entry_liquidity_usd", "entry_mcap_usd", "entry_fee_pct", "entry_price_impact_pct", "sol_usd_at_entry",
+    "entry_values_source", "entry_liquidity_usd", "entry_mcap_usd", "entry_dex", "entry_fee_pct", "entry_price_impact_pct", "sol_usd_at_entry",
     "mint_authority_revoked_onchain", "freeze_authority_revoked_onchain", "chain_checked_before_entry",
     "safety_report_age_s", "top10_pct", "top_holder_pct", "lp_locked_pct", "rugcheck_risk_score", "total_holders", "insiders_detected",
     "bot_volume_flag", "buys_m5", "sells_m5", "buys_h1", "sells_h1", "vol_m5_usd", "vol_h1_usd", "price_chg_m5_pct", "price_chg_h1_pct", "paid_boost",
-    "on_rising_by_entry", "first_on_rising_at_utc", "rising_score_at_first_appearance", "rising_pattern",
-    "theme", "launchpad",
+    "on_rising_at_signal", "on_rising_at_entry", "momentum_score_at_entry", "on_rising_by_entry", "first_on_rising_at_utc", "rising_score_at_first_appearance", "rising_pattern",
+    "theme", "launchpad", "mayhem_mode",
 )
 OPEN_COLUMNS = (
     "trade_id", "strategy", "mint", "symbol", "name", "entry_at_utc", "entry_price_usd", "size_sol", "cost_sol",
@@ -56,7 +57,14 @@ exit_price_usd is the price of the last sale; avg_exit_price_usd weights all sal
 affected_by_outage = went 5+ minutes without a price while open (computer asleep, app off). The
                      Shadow Bot page leaves these out of its headline numbers and the go/no-go gate.
 
-Where the "at entry" columns come from (for failed and pending trades: at the signal instead):
+rules_version        which version of the rules made the trade (config/settings.yaml, shadow.rules_version).
+                     Only the current version counts on the Shadow Bot page. 1 = before the slippage limit
+                     and the real-graduation check; it includes trades in stablecoins and near-empty pools.
+entry_values_source  "saved" = the "at entry" columns are exactly what the engine saw when it entered (or when
+                     the entry failed). "rebuilt" = version 1 trades, pieced together afterwards as described below.
+on_rising_at_entry, on_rising_at_signal, momentum_score_at_entry   saved trades only.
+
+Where the rebuilt "at entry" columns come from (for failed and pending trades: at the signal instead):
   entry_liquidity_usd, entry_fee_pct, entry_price_impact_pct, sol_usd_at_entry   saved with the buy itself
   entry_mcap_usd, bot_volume_flag, buys/sells/vol/price_chg, paid_boost            the latest stored DexScreener snapshot at or
                                                                                    before entry; bot_volume_flag is recomputed from it
@@ -99,8 +107,8 @@ def trade_row(db: sqlite3.Connection, t: Mapping[str, Any], cfg: Mapping[str, An
     sold = sum(f["tokens"] for f in sells)
     closed = t["status"] == "closed"
     checked = token.get("chain_checked_at")
-    return {
-        "trade_id": t["id"], "strategy": t["strategy"], "status": t["status"], "mint": t["mint"],
+    row = {
+        "trade_id": t["id"], "rules_version": t.get("rules_version"), "strategy": t["strategy"], "status": t["status"], "mint": t["mint"],
         "symbol": token.get("symbol"), "name": token.get("name"),
         "migrated_at_utc": _iso(t["migrated_at"]), "signal_at_utc": _iso(t["signal_ts"]), "signal_price_usd": t["signal_price"],
         "entry_at_utc": _iso(t["entry_ts"]),
@@ -135,8 +143,31 @@ def trade_row(db: sqlite3.Connection, t: Mapping[str, Any], cfg: Mapping[str, An
         "price_chg_m5_pct": snap.get("price_chg_m5"), "price_chg_h1_pct": snap.get("price_chg_h1"), "paid_boost": _yes(snap.get("boosted")),
         "on_rising_by_entry": "yes" if rising and rising["ts"] <= at else "no",
         "first_on_rising_at_utc": _iso(rising.get("ts")), "rising_score_at_first_appearance": rising.get("score"), "rising_pattern": rising.get("pattern"),
-        "theme": token.get("theme"), "launchpad": token.get("launchpad"),
+        "theme": token.get("theme"), "launchpad": token.get("launchpad"), "mayhem_mode": _yes(token.get("mayhem_mode")),
+        "entry_values_source": "rebuilt", "entry_dex": snap.get("dex_id"),
+        "on_rising_at_signal": None, "on_rising_at_entry": None, "momentum_score_at_entry": None,
     }
+    saw = json.loads(t["entry_json"]) if t.get("entry_json") else None
+    if saw:
+        # From rules version 2 the engine saves what it saw; those exact values replace the rebuilt ones.
+        row.update(
+            entry_values_source="saved", entry_dex=saw.get("dex_id"), entry_mcap_usd=saw.get("mcap"),
+            entry_liquidity_usd=row["entry_liquidity_usd"] if row["entry_liquidity_usd"] is not None else saw.get("liquidity_usd"),
+            mint_authority_revoked_onchain=_yes(None if saw.get("chain_mint_authority") is None else not saw["chain_mint_authority"]),
+            freeze_authority_revoked_onchain=_yes(None if saw.get("chain_freeze_authority") is None else not saw["chain_freeze_authority"]),
+            chain_checked_before_entry=_yes(saw.get("chain_checked_at") is not None),
+            safety_report_age_s=None if saw.get("safety_age_s") is None else round(saw["safety_age_s"]),
+            top10_pct=saw.get("top10_pct"), top_holder_pct=saw.get("top_holder_pct"), lp_locked_pct=saw.get("lp_locked_pct"),
+            rugcheck_risk_score=saw.get("risk_score"), total_holders=saw.get("total_holders"),
+            bot_volume_flag=_yes(saw.get("bot_volume")),
+            buys_m5=saw.get("buys_m5"), sells_m5=saw.get("sells_m5"), buys_h1=saw.get("buys_h1"), sells_h1=saw.get("sells_h1"),
+            vol_m5_usd=saw.get("vol_m5"), vol_h1_usd=saw.get("vol_h1"), price_chg_m5_pct=saw.get("price_chg_m5"),
+            price_chg_h1_pct=saw.get("price_chg_h1"), paid_boost=_yes(None if saw.get("boosts_active") is None else saw["boosts_active"] > 0),
+            on_rising_at_entry=_yes(saw.get("on_rising")), momentum_score_at_entry=saw.get("score"),
+        )
+    if t.get("signal_json"):
+        row["on_rising_at_signal"] = _yes(json.loads(t["signal_json"]).get("on_rising"))
+    return row
 
 
 def open_row(t: Mapping[str, Any], full: Mapping[str, Any], now: float) -> dict[str, Any]:
