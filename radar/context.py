@@ -48,7 +48,7 @@ class Ctx:
     # Shadow bot: the strategies from strategies/*.yaml (loaded on first use), when paper
     # trading began, and what has happened since the app started.
     shadow_strategies: list[dict[str, Any]] | None = None
-    shadow_started_at: float | None = None
+    shadow_versions: dict[str, dict[str, Any]] | None = None   # per strategy: current rules version, when it began
     shadow_counts: dict[str, int] = field(
         default_factory=lambda: {"signals": 0, "entered": 0, "failed": 0, "closed": 0, "not_graduations": 0}
     )

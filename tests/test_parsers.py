@@ -207,11 +207,17 @@ def test_parse_report_with_no_holder_or_market_data_reports_unknown():
 def test_view_helpers():
     assert is_mint(FRANK) and not is_mint("0xabc") and not is_mint(None)
     assert is_graduated({"migrated_at": 5.0})
-    assert is_graduated({"dex_id": "pumpswap", "liquidity_usd": 50_000.0})
-    assert not is_graduated({"dex_id": "pumpfun"}) and not is_graduated({"dex_id": "bags", "liquidity_usd": None})
+    # A pool alone is not a graduation (USDC has pools): we must have watched the launch on pump.fun.
+    assert not is_graduated({"dex_id": "pumpswap", "liquidity_usd": 50_000.0})
+    launched = {"source": "pumpportal", "launchpad": "pump.fun", "bonding_curve": "Curve"}
+    assert is_graduated({**launched, "dex_id": "pumpswap", "liquidity_usd": 50_000.0})    # graduated while we were not listening
+    assert not is_graduated({**launched, "dex_id": "orca", "liquidity_usd": 50_000.0})
+    assert not is_graduated({**launched, "dex_id": "pumpswap", "liquidity_usd": 50_000.0, "launchpad": "bonk"})
+    assert not is_graduated({**launched, "dex_id": "pumpfun"}) and not is_graduated({"dex_id": "bags", "liquidity_usd": None})
     assert not is_graduated({})
     row = view_row({"mint": FRANK, "boosts_active": 0, "boost_seen_at": 100.0, "dex_id": "pumpswap", "liquidity_usd": 1.0}, now=200.0)
-    assert row["paid_boost"] is True and row["graduated"] is True
+    assert row["paid_boost"] is True and row["graduated"] is False and row["has_pool"] is True
+    assert view_row({"mint": FRANK, "migrated_at": 5.0}, now=200.0)["graduated"] is True
     assert view_row({"mint": FRANK}, now=200.0)["paid_boost"] is False
 
 

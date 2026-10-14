@@ -57,9 +57,10 @@ exit_price_usd is the price of the last sale; avg_exit_price_usd weights all sal
 affected_by_outage = went 5+ minutes without a price while open (computer asleep, app off). The
                      Shadow Bot page leaves these out of its headline numbers and the go/no-go gate.
 
-rules_version        which version of the rules made the trade (config/settings.yaml, shadow.rules_version).
-                     Only the current version counts on the Shadow Bot page. 1 = before the slippage limit
-                     and the real-graduation check; it includes trades in stablecoins and near-empty pools.
+rules_version        which version of that strategy's rules made the trade. Versions are per strategy and start
+                     by themselves when its file or a shared setting changes. Only a strategy's latest version
+                     counts on the Shadow Bot page. The trades of 2026-10-13 before the slippage limit and the
+                     real-graduation check are version 1; they include stablecoins and near-empty pools.
 entry_values_source  "saved" = the "at entry" columns are exactly what the engine saw when it entered (or when
                      the entry failed). "rebuilt" = version 1 trades, pieced together afterwards as described below.
 on_rising_at_entry, on_rising_at_signal, momentum_score_at_entry   saved trades only.

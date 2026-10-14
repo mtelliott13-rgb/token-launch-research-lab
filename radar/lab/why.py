@@ -33,7 +33,7 @@ from typing import Any, Mapping, Sequence
 
 from radar.context import Ctx
 from radar.scoring.momentum import momentum
-from radar.view import PAID_BOOST_WINDOW_S, authorities, is_graduated
+from radar.view import PAID_BOOST_WINDOW_S, authorities, has_pool, is_graduated
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +55,8 @@ LABELS = {
     "holder_growth": "Holder growth since first safety check",
     "liquidity_change": "Liquidity change, last hour",
 }
-STAGES = {"curve": "still on the bonding curve", "just_graduated": "just graduated", "graduated": "graduated"}
+STAGES = {"curve": "still on the bonding curve", "just_graduated": "just graduated", "graduated": "graduated",
+          "pool": "trading in a liquidity pool, not a pump.fun graduation we saw"}
 FAMILY_WORDS = {"volume": "volume", "buying": "buying", "price": "price", "holders": "holder growth", "liquidity": "liquidity"}
 CANNOT_SEE = "We cannot see X posts, Telegram calls or individual trades, so this describes what is happening, not what set it off."
 
@@ -88,7 +89,8 @@ def measure(row: Mapping[str, Any], extra: Mapping[str, Any], now: float, cfg: M
 
     graduated_min_ago = (now - migrated) / 60 if migrated else None
     if not is_graduated(row):
-        stage = "curve"
+        # A pool without a graduation: another launchpad's token, an older token, or one whose launch we missed.
+        stage = "pool" if has_pool(row) else "curve"
     elif graduated_min_ago is not None and graduated_min_ago <= cfg["recent_graduation_min"]:
         stage = "just_graduated"
     else:

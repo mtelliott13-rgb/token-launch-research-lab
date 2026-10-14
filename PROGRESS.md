@@ -17,8 +17,8 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`), Shadow Bot (`/shadow`).
 
-**A restart is pending** for the "affected by outage" split and for shadow bot rules version 2
-(both built 2026-10-13). Everything else below, including the shadow bot, has been live since the restart
+**A restart is pending** for the "affected by outage" split, shadow bot rules version 2,
+per-strategy versions and the app-wide graduation rule (all built 2026-10-13). Everything else below, including the shadow bot, has been live since the restart
 on 2026-10-13 at 15:32.
 
 ## What exists
@@ -40,7 +40,7 @@ on 2026-10-13 at 15:32.
 | Stall watchdog and sleep detection | 2026-10-11 | `radar/collectors/pumpportal.py` |
 | Shadow bot, Lane B (paper trades) | 2026-10-13 | `radar/lab/shadow.py`, `strategies/`, `static/shadow.html` |
 
-153 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
+157 tests pass (`uv run pytest`). All thresholds are in `config/settings.yaml`. Nothing here
 trades, signs or holds keys: the shadow bot only writes rows to the database.
 
 ## When each page will have enough data
@@ -279,10 +279,14 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
     had `is_mayhem_mode` set, and they reached PumpSwap at a market cap of a few dollars. Why
     Mayhem Mode tokens migrate like that was not researched. The slippage limit stops them;
     Mayhem Mode itself is not excluded, and is saved with each trade.
-  - *Rules version:* every trade carries `rules_version` (`shadow.rules_version`, now 2; the
-    first 186 trades are version 1). The page's headline numbers, curve and gate count only the
-    current version, from when it began; earlier versions have their own table. Bump the number
-    whenever a strategy file or a shadow setting changes; the page warns if you forget.
+  - *Rules versions, per strategy and automatic (2026-10-13):* each strategy has its own
+    version, started by itself when its file in `strategies/`, a shared rule setting (fees,
+    slippage, entry limits, fail and late shares, entry wait, price misses, Rising freshness)
+    or the engine's own rules (`ENGINE_RULES` in `radar/lab/shadow.py`) changes. Adding or
+    changing one strategy leaves the others' go/no-go clocks alone. Versions are in the
+    `strategy_versions` table; each trade carries its strategy's `rules_version`. The first 186
+    trades are version 1 of each strategy; version 2 starts at the next restart. Renaming a
+    strategy's `name` or `description` starts nothing; renaming its file makes it a new strategy.
   - *Entry-time values:* `signal_json` and `entry_json` on each trade hold exactly what the
     engine saw (safety, on-chain authority, bot flag, Rising, score, pool, volumes). The export
     uses them and marks each row "saved" or "rebuilt".
@@ -290,6 +294,29 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
   `open_positions_<time>.csv` and a README. Read-only.
 - **Not built:** Lane A (needs trade data), several latencies (we only have one: the next
   price), deployer reputation, risk exits on creator or early-buyer selling.
+
+## One rule for "graduated" (2026-10-13, needs the restart)
+
+`radar/lab/graduation.py`. A graduation is a token we watched launch on pump.fun's bonding
+curve that then moved to PumpSwap: either we got its first "migrate" message (that sets
+`migrated_at`, and later messages for the same token change nothing), or we got no message
+(asleep) but DexScreener now prices it from a PumpSwap pool. Having a pool is not enough.
+
+- Applied to: the dashboard "Graduated" badge and filter, follow-up priority, the Patterns
+  graduation rate (now pump.fun launches only), the Rising stage in "Why it's rising" (a new
+  stage, "trading in a liquidity pool, not a pump.fun graduation we saw"), retention tiers, the
+  on-chain check queue, the refresh schedule and the shadow bot.
+- At the first start, every recorded "migrate" message is rechecked once. Dry run on a copy:
+  2,687 real, 881 cleared, 20 graduation times put back to the first message, 2,043 Rising
+  entries relabelled from "graduated" to "pool". The messages stay in `migrations`.
+- Effect, measured on a copy on 2026-10-13: tokens shown as graduated 12,675 -> 2,864 (about
+  9,100 of the difference are GeckoTerminal and DexScreener tokens that simply have a pool).
+  Among the 107,143 pump.fun launches we saw: 2,905 -> 2,864 (2.71% -> 2.67%). No outcome is
+  final yet, so no Patterns or outcome figure that has been shown changes.
+- 177 graduations are "untimed" (no message, PumpSwap pool seen). They count everywhere except
+  the shadow bot, which needs the moment.
+- Retention: a token with a pool but no graduation is no longer kept in full for that reason
+  alone; it needs the $30K peak (or $10K or Rising for its first 4 hours), like any other.
 
 ## Outside requests, per day
 

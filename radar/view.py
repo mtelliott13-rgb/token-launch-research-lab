@@ -49,13 +49,28 @@ def clean_text(value: Any, limit: int) -> str | None:
     return value[:limit] or None
 
 
-def is_graduated(row: Mapping[str, Any]) -> bool:
-    """Off the bonding curve: we saw it migrate, or DexScreener reports pool liquidity for it.
+GRADUATION_POOL = "pumpswap"   # DexScreener's name for the exchange pump.fun tokens graduate to
 
-    DexScreener gives no liquidity figure for any bonding-curve venue (pump.fun, Meteora DBC,
-    Bags, ...), and token_state.liquidity_usd only ever comes from DexScreener.
+
+def launch_seen(row: Mapping[str, Any]) -> bool:
+    """We received this token's creation on pump.fun's bonding curve."""
+    return row.get("source") == "pumpportal" and row.get("launchpad") == "pump.fun" and bool(row.get("bonding_curve"))
+
+
+def has_pool(row: Mapping[str, Any]) -> bool:
+    """It trades in a liquidity pool. DexScreener gives no liquidity figure for a bonding curve,
+    and token_state.liquidity_usd only ever comes from DexScreener."""
+    return row.get("liquidity_usd") is not None
+
+
+def is_graduated(row: Mapping[str, Any]) -> bool:
+    """A real pump.fun graduation (see radar/lab/graduation.py; radar.db.store.GRADUATED_SQL must match).
+
+    migrated_at is only ever set by a verified graduation. Without it, a token we watched launch
+    that DexScreener now prices from a PumpSwap pool graduated while we were not listening.
+    Having a pool is not enough: USDC has pools.
     """
-    return bool(row.get("migrated_at")) or row.get("liquidity_usd") is not None
+    return bool(row.get("migrated_at")) or (launch_seen(row) and row.get("dex_id") == GRADUATION_POOL and has_pool(row))
 
 
 def authorities(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -85,6 +100,7 @@ def view_row(row: Mapping[str, Any], now: float) -> dict[str, Any]:
     out = {k: row.get(k) for k in _VIEW_FIELDS}
     out.update(authorities(row), chain_checked_at=row.get("chain_checked_at"))
     out["graduated"] = is_graduated(row)
+    out["has_pool"] = has_pool(row)
     # We asked RugCheck and it has nothing, which is different from never having asked.
     out["no_rugcheck_report"] = row.get("safety_ts") is None and bool(row.get("safety_miss_count"))
     boost_seen = row.get("boost_seen_at")

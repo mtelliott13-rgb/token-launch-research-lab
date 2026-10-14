@@ -26,6 +26,7 @@ import websockets
 from radar.collectors.common import publish_tokens, to_float
 from radar.context import Ctx
 from radar.faillog import FailureLog
+from radar.lab import graduation
 from radar.lab.outages import OutageTracker, fmt_length
 from radar.view import clean_text, clean_url, is_mint
 
@@ -70,16 +71,22 @@ def handle_create(ctx: Ctx, msg: dict[str, Any], now: float) -> None:
 
 
 def handle_migrate(ctx: Ctx, msg: dict[str, Any], now: float) -> None:
+    """A PumpSwap pool was opened for this token. That is a graduation only for a token we
+    watched launch on pump.fun, and only the first time (see radar/lab/graduation.py)."""
     mint = msg["mint"]
     store = ctx.store
+    row = store.row(mint)
+    repeat = store.migration_count(mint) > 0
+    problem = "not its first migration" if repeat else graduation.why_not(row, now, ctx.cfg["rising"]["exclude_mints"], ctx.outages)
     with store.tx():
         store.add_raw_event(now, NAME, "migrate", mint, msg)
         store.add_migration(mint, now, clean_text(msg.get("pool"), 40), clean_text(msg.get("signature"), 100))
-        # Usually we saw this token being created; if not (we were offline), record it now.
-        store.upsert_token(mint, source=NAME, first_seen_at=now, launchpad="pump.fun")
-        store.update_state(mint, migrated_at=now)
+        # A token we have never seen is recorded now. Only pump.fun's own addresses end in "pump".
+        store.upsert_token(mint, source=NAME, first_seen_at=now, launchpad="pump.fun" if mint.endswith("pump") else None)
+        if problem is None:
+            store.update_state(mint, migrated_at=now)
         store.schedule_refresh(mint, now)
-    if ctx.safety:
+    if problem is None and ctx.safety:
         ctx.safety.request(mint, priority=2)
     publish_tokens(ctx, [mint], now)
 

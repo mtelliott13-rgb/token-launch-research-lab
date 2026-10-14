@@ -147,7 +147,7 @@
   </section>
 
   <section id="old-section" hidden>
-    <div class="head"><h2>Earlier rules versions</h2><span class="sub">trades made before the rules last changed: not in any figure above, and not in the gate</span></div>
+    <div class="head"><h2>Earlier rules versions</h2><span class="sub">trades a strategy made before its rules last changed: not in any figure above, and not in its gate</span></div>
     <div class="wrap"><table>
       <thead><tr><th>Strategy</th><th class="num">Rules version</th><th class="num">Closed trades</th><th class="num">Hit rate</th><th class="num">Median return</th><th class="num">Mean return</th><th class="num">Profit</th><th class="num" title="Positions opened under that version and still running. They are sold by the usual exit rules.">Still open</th></tr></thead>
       <tbody id="old"></tbody>
@@ -292,18 +292,18 @@ function render(d) {
     x.open_affected = x.open_affected || 0;
     x.earlier = x.earlier || [];
   }
-  const versioned = d.rules_version != null, limits = A.entry_limits;
+  const versioned = list.some((x) => x.version != null), limits = A.entry_limits;
   const base = "No wallet, no keys, no orders. Every trade here is a row in the database.";
-  $("banner-text").replaceChildren(...[
-    h("div", null, !versioned
-      ? (d.started_at == null ? `${base} Paper trading starts with the first graduation seen after the app is restarted.` : `${base} Paper trading began ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days ago).`)
-      : d.started_at == null
-        ? `${base} Rules version ${d.rules_version} has not traded yet: it starts with the first graduation seen after the restart.`
-        : `${base} These figures are for rules version ${d.rules_version}, in use since ${fmtWhen(d.started_at)} (${d.days.toFixed(1)} days). Only tokens that graduated after that are traded, and trades made under earlier versions are listed separately below.`),
-    d.rules_changed_unversioned ? h("div", { style: "margin-top:6px" }, h("span", { class: "mark warn" }, "▲ "), `A strategy file or a shadow setting has changed since version ${d.rules_version} began, but the version number was not raised, so trades made under different rules are being counted together. Raise rules_version in config/settings.yaml and restart.`) : null].filter(Boolean));
+  // Which rules a strategy's figures are for, and since when.
+  const since = (x) => !versioned ? null : x.version_started_at == null
+    ? `Rules v${x.version}: starts at the next restart, nothing traded yet`
+    : `Rules v${x.version}, since ${fmtWhen(x.version_started_at)} (${x.days.toFixed(1)} days)`;
+  $("banner-text").textContent = !versioned
+    ? (d.started_at == null ? `${base} Paper trading starts with the first graduation seen after the app is restarted.` : `${base} Paper trading began ${fmtWhen(d.started_at)} (${(d.days || 0).toFixed(1)} days ago).`)
+    : `${base} Each strategy's figures count only the trades made under its current rules, and only tokens that graduated after those rules began. Change a strategy file and that strategy starts a new version at the next restart; the others keep their clocks.`;
   $("cmp-sub").textContent = `${list.length} strategies from the strategies/ folder, ${list[0] ? list[0].size_sol : 0.5} SOL per trade`;
   $("cmp").replaceChildren(...list.map((x, i) => h("tr", null,
-    h("td", { class: "what" }, h("div", null, swatch(i), x.name), h("div", { class: "desc" }, x.description)),
+    h("td", { class: "what" }, h("div", null, swatch(i), x.name), h("div", { class: "desc" }, x.description), h("div", { class: "desc" }, since(x))),
     num(fmtInt(x.trades)),
     num(x.hit_rate_pct == null ? DASH : x.hit_rate_pct.toFixed(1) + "%", "", `${x.wins} of ${x.trades}`),
     num(fmtPct(x.median_return_pct), sign(x.median_return_pct)),
@@ -337,9 +337,9 @@ function render(d) {
   drawChart(d);
 
   $("gates").replaceChildren(...list.map((x, i) => h("div", { class: "tile" },
-    h("h3", null, swatch(i), x.name), gateChip(x.gate),
+    h("h3", null, swatch(i), x.name), gateChip(x.gate), h("div", { class: "muted", style: "margin-top:6px" }, since(x)),
     h("ul", null, x.gate.checks.map((c) => h("li", null, h("span", { class: "mark " + (c.ok ? "ok" : "crit") }, c.ok ? MARKS.ok : MARKS.crit), h("span", null, c.name), h("span", { class: "have" }, c.have)))))));
-  $("gate-note").textContent = `Only trades made under the current rules version count, and the days are counted from when it began. Trades affected by an outage are left out of every line. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
+  $("gate-note").textContent = `Each strategy is judged only on trades made under its current rules, and its days are counted from when those rules began. Trades affected by an outage are left out of every line. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
 
   const count = (o, k) => fmtInt(o[k] || 0);
   $("ends").replaceChildren(...list.map((x, i) => h("tr", null,
@@ -349,14 +349,14 @@ function render(d) {
     num(count(x.failed, "entry did not land")), num(fmtInt((x.failed["no price in time"] || 0) + (x.failed["no pool to buy from"] || 0))), num(fmtInt(x.pending)),
     num(x.trades ? x.fees_sol.toFixed(3) + " SOL" : DASH))));
 
-  const recent = list.flatMap((x, i) => x.recent.map((t) => ({ ...t, i, strategy: x.name }))).sort((a, b) => (b.closed_at || b.entry_ts) - (a.closed_at || a.entry_ts)).slice(0, 30);
+  const recent = list.flatMap((x, i) => x.recent.map((t) => ({ ...t, i, strategy: x.name, current: x.version }))).sort((a, b) => (b.closed_at || b.entry_ts) - (a.closed_at || a.entry_ts)).slice(0, 30);
   $("recent-sub").textContent = recent.length ? "newest first" : "none yet";
   $("recent").replaceChildren(...recent.map((t) => h("tr", null,
     h("td", null, fmtWhen(t.closed_at || t.entry_ts)),
     h("td", null, swatch(t.i), t.strategy),
     h("td", null, h("a", { href: `https://dexscreener.com/solana/${t.mint}`, target: "_blank", rel: "noopener noreferrer" }, t.symbol || t.mint.slice(0, 6)), " ", h("span", { class: "muted" }, t.name || "")),
     h("td", null, t.status === "open" ? "open" : "sold: " + (REASONS[t.exit_reason] || t.exit_reason),
-      versioned && t.rules_version !== d.rules_version ? h("span", { class: "gate", style: "margin-left:8px", title: "Made under an earlier version of the rules; not counted above" }, `rules v${t.rules_version}`) : null,
+      versioned && t.rules_version !== t.current ? h("span", { class: "gate", style: "margin-left:8px", title: "Made under an earlier version of the rules; not counted above" }, `rules v${t.rules_version}`) : null,
       t.affected ? h("span", { class: "gate", style: "margin-left:8px", title: `Went ${Math.round(Math.max(t.max_gap_s || 0, A.outage_gap_s) / 60)} minutes or more without a price while open` }, h("span", { class: "mark warn" }, "▲"), "affected by outage") : null),
     num(t.status === "open" ? DASH : fmtPct(t.return_pct), sign(t.return_pct)),
     num(t.status === "open" ? DASH : fmtSol(t.pnl_sol), sign(t.pnl_sol)))));

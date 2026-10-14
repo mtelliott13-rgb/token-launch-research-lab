@@ -194,12 +194,11 @@ shadow:
     pool_share: 0.5
     impact_multiplier: 2.0        # pessimism: count that price move twice
     extra_pct: 1.0                # and lose a further 1% each way to the price moving before we land
-  # Bump this number whenever the rules change (anything in this block, or a file in
-  # strategies/). Every paper trade is tagged with it, and only trades made under the current
-  # number count toward the headline figures and the go / no-go gate.
-  #   1 = first version (2026-10-13)
-  #   2 = slippage limit, real pump.fun graduations only (2026-10-13)
-  rules_version: 2
+  # Rules versions are per strategy and automatic: change a file in strategies/ and that
+  # strategy starts a new version at the next restart; change fees, slippage, entry_limits,
+  # entry_fail_pct, exit_late_pct, max_entry_wait_s, no_price_misses or rising_fresh_s below
+  # and every strategy does. Only a strategy's current version counts toward its headline
+  # figures and its go / no-go gate. Changing refresh, outage_gap_s or gate starts nothing.
   # An entry is skipped, and recorded as failed with the reason "slippage limit", when the pool
   # is smaller than this or our trade would move the price by more than this (as modelled above).
   entry_limits:

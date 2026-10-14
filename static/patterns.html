@@ -141,7 +141,7 @@ const blank = () => Object.fromEntries(KEYS.map((k) => [k, 0]));
 function head(first) {
   return h("tr", null, h("th", null, first),
     h("th", { class: "num", title: "Tokens in this row: pump.fun launches with a complete outcome" }, "Tokens (n)"),
-    h("th", { class: "num", title: "Share that left the bonding curve" }, "Graduated"),
+    h("th", { class: "num", title: "Share that moved from pump.fun's bonding curve to PumpSwap: we saw the migration, or the token now trades in its PumpSwap pool. A pool somewhere else does not count." }, "Graduated"),
     h("th", { class: "num", title: "Peak: runner or moonshot" }, "Runner or better"),
     h("th", { class: "num", title: "Peak: moonshot" }, "Moonshot"),
     h("th", { class: "num", title: "Peak: flat" }, "Flat"),

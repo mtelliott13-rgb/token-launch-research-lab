@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Mapping
 
-from radar.db.store import Store
+from radar.db.store import GRADUATED_SQL, Store
 from radar.lab.followups import allowed_late, checkpoints
 
 OUTCOME_VALUE_FIELDS = (
@@ -82,11 +82,11 @@ def patterns(db: sqlite3.Connection, cfg: Mapping[str, Any], themes: list[str]) 
     cur = db.execute(
         "SELECT COALESCE(t.theme, 'other'), "
         "CAST(strftime('%w', t.created_at, 'unixepoch') AS INTEGER) * 24 + CAST(strftime('%H', t.created_at, 'unixepoch') AS INTEGER), "
-        "COUNT(*), SUM(s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL), "
+        f"COUNT(*), SUM({GRADUATED_SQL}), "
         "SUM(o.peak = 'moonshot'), SUM(o.peak = 'runner'), SUM(o.peak = 'flat'), "
         "SUM(o.fate = 'rugged'), SUM(o.fate = 'dead'), SUM(o.fate = 'alive') "
         "FROM outcomes o JOIN tokens t ON t.mint = o.mint JOIN token_state s ON s.mint = o.mint "
-        "WHERE o.complete = 1 AND t.source = 'pumpportal' GROUP BY 1, 2"
+        "WHERE o.complete = 1 AND t.source = 'pumpportal' AND t.launchpad = 'pump.fun' GROUP BY 1, 2"
     )
     for theme, hour, *values in cur:
         for group in (by_theme.setdefault(theme, blank()), by_hour[hour]):

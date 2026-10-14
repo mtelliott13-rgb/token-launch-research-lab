@@ -236,3 +236,9 @@ def test_contradictory_authority_report_is_a_warning():
     a = analysed(token(safety_ts=NOW - 60, authority_conflict=1), {"safety": safety()})
     assert [w["key"] for w in a["warnings"]] == ["authority_unverified"] and a["pattern"].endswith("/warnings")
     assert "authorities unverified" in a["explanation"]
+
+
+def test_a_pool_without_a_graduation_is_its_own_stage():
+    a = analysed(token(liquidity_usd=30_000.0, migrated_at=None, dex_id="raydium"))
+    assert a["stage"] == "pool" and a["pattern"].startswith("pool/")
+    assert "not a pump.fun graduation" in json.dumps(a)

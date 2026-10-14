@@ -320,6 +320,16 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 CREATE INDEX IF NOT EXISTS idx_paper_trades_mint ON paper_trades(mint);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status, strategy);
 
+-- Each strategy's rules versions. A new one starts by itself whenever that strategy's file or a
+-- shared shadow setting changes; a strategy's go / no-go clock runs from its current version.
+CREATE TABLE IF NOT EXISTS strategy_versions (
+    strategy        TEXT NOT NULL,
+    version         INTEGER NOT NULL,
+    fingerprint     TEXT,              -- of the rules; NULL for trades made before versions were tracked
+    started_at      REAL NOT NULL,
+    PRIMARY KEY (strategy, version)
+);
+
 CREATE TABLE IF NOT EXISTS paper_fills (
     id              INTEGER PRIMARY KEY,
     trade_id        INTEGER NOT NULL,

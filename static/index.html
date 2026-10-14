@@ -277,7 +277,7 @@ function flags(r) {
   if (r.rugged) out.push(badge("crit", "Rugged", "RugCheck has flagged this token as rugged"));
   if (r.paid_boost) out.push(badge("warn", "Paid boost", "Paid promotion on DexScreener. This is advertising, not organic interest."));
   if (r.trending_rank) out.push(badge("info", "Trending #" + r.trending_rank, "On GeckoTerminal's Solana trending list"));
-  if (r.graduated) out.push(badge("info", "Graduated", "Off the bonding curve: it has a real liquidity pool"));
+  if (r.graduated) out.push(badge("info", "Graduated", "We watched it launch on pump.fun and it moved to PumpSwap. Tokens that merely have a liquidity pool do not get this badge."));
   if (r.bot_volume) out.push(badge("warn", "Likely bot volume", "Many trades in the last hour but the price barely moved, which usually means wallets trading back and forth to inflate the numbers. Only applied to tokens under $1M market cap. Thresholds are in config/settings.yaml."));
   if (r.no_rugcheck_report) out.push(badge("idle", "No RugCheck report", "We asked RugCheck and it has no report for this token."));
   else if (r.safety_ts == null) out.push(badge("idle", "Unchecked", "No safety report yet. Open the token to fetch one."));

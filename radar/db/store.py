@@ -11,8 +11,12 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 
 ROW_SQL = "SELECT t.*, s.* FROM tokens t JOIN token_state s ON s.mint = t.mint"
 
-# Must match radar.view.is_graduated: we saw it migrate, or it has a real liquidity pool.
-GRADUATED_SQL = "(s.migrated_at IS NOT NULL OR s.liquidity_usd IS NOT NULL)"
+# Must match radar.view.is_graduated: a verified graduation, or a token we watched launch on
+# pump.fun that now trades in a PumpSwap pool. Needs tokens as t and token_state as s.
+GRADUATED_SQL = (
+    "(s.migrated_at IS NOT NULL OR (t.source = 'pumpportal' AND t.launchpad = 'pump.fun' AND t.bonding_curve IS NOT NULL "
+    "AND t.dex_id = 'pumpswap' AND s.liquidity_usd IS NOT NULL))"
+)
 
 # Columns added to schema.sql after databases already existed. CREATE TABLE IF NOT EXISTS
 # leaves an existing table as it is, so older databases get these added on start.
@@ -335,6 +339,16 @@ class Store:
 
     def migration_count(self, mint: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM migrations WHERE mint = ?", (mint,)).fetchone()[0]
+
+    def strategy_versions(self, strategy: str) -> list[dict[str, Any]]:
+        cur = self.db.execute("SELECT * FROM strategy_versions WHERE strategy = ? ORDER BY version", (strategy,))
+        return [dict(r) for r in cur]
+
+    def add_strategy_version(self, strategy: str, version: int, fingerprint: str | None, started_at: float) -> None:
+        self.db.execute(
+            "INSERT INTO strategy_versions (strategy, version, fingerprint, started_at) VALUES (?, ?, ?, ?)",
+            (strategy, version, fingerprint, started_at),
+        )
 
     def graduated_unchecked(self, since: float, limit: int) -> list[dict[str, Any]]:
         """Tokens we saw graduate since `since` whose authorities have not been read from the chain."""

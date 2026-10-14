@@ -65,11 +65,18 @@ def test_patterns_count_only_complete_pump_fun_launches():
         ("C", "Trump 2028", "pumpportal", 1, False, "moonshot", "alive"),
         ("D", "Lazy Cat", "pumpportal", 0, True, "runner", None),      # outcome not complete: not counted
         ("E", "Old Cat", "gecko", 1, True, "flat", "alive"),           # we did not see it launch: not counted
+        ("F", "Bonk Cat", "pumpportal", 1, True, "flat", "alive"),     # another launchpad's token: not counted
     ]
     for mint, name, source, complete, graduated, peak, fate in tokens:
-        s.upsert_token(mint, source=source, first_seen_at=launch, created_at=launch, name=name)
+        s.upsert_token(mint, source=source, first_seen_at=launch, created_at=launch, name=name, bonding_curve="Curve",
+                       launchpad="bonk" if mint == "F" else "pump.fun")
         s.update_state(mint, migrated_at=launch + 900 if graduated else None)
         s.upsert_outcome(mint, {"p0_price": 1.0, "final": complete, "complete": complete, "peak": peak, "fate": fate})
+    # A pool is not a graduation, unless it is the PumpSwap pool of a token we watched launch.
+    s.set_token("B", dex_id="raydium")
+    s.update_state("B", liquidity_usd=90_000.0)
+    s.set_token("C", dex_id="pumpswap")
+    s.update_state("C", liquidity_usd=40_000.0)
 
     p = stats.patterns(s.db, cfg, TAGGER.themes)
     themes = {g["theme"]: g for g in p["themes"]}
@@ -77,10 +84,11 @@ def test_patterns_count_only_complete_pump_fun_launches():
     assert themes["animal"] == {"theme": "animal", "n": 2, "graduated": 1, "moonshot": 0, "runner": 1, "flat": 1,
                                 "rugged": 1, "dead": 1, "alive": 0}
     assert (themes["political"]["n"], themes["political"]["moonshot"], themes["political"]["alive"]) == (1, 1, 1)
+    assert themes["political"]["graduated"] == 1          # no migrate message, but now in its PumpSwap pool
     assert themes["other"]["n"] == 0
     hours = {i: g["n"] for i, g in enumerate(p["hours_utc"]) if g["n"]}
     assert hours == {4 * 24 + 18: 3}                           # Thursday is day 4 (Sunday = 0), hour 18 UTC
-    assert p["tagged"] == {"animal": 4, "political": 1} and p["samples"]["political"] == ["Trump 2028"]
+    assert p["tagged"] == {"animal": 5, "political": 1} and p["samples"]["political"] == ["Trump 2028"]
     # nothing can be complete before the 7d checkpoint's window closes: 7 days + 6 hours after launch
     assert p["ready"]["hours_at"] == launch + 86400 + 7 * 86400 + 6 * 3600
     assert p["ready"]["weekdays_at"] == launch + 14 * 86400 + 6 * 3600
