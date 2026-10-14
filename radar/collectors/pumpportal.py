@@ -23,7 +23,7 @@ from typing import Any
 import certifi
 import websockets
 
-from radar.collectors.common import publish_tokens, to_float
+from radar.collectors.common import publish_tokens, to_float, want_links_at_graduation
 from radar.context import Ctx
 from radar.faillog import FailureLog
 from radar.lab import graduation
@@ -85,6 +85,7 @@ def handle_migrate(ctx: Ctx, msg: dict[str, Any], now: float) -> None:
         store.upsert_token(mint, source=NAME, first_seen_at=now, launchpad="pump.fun" if mint.endswith("pump") else None)
         if problem is None:
             store.update_state(mint, migrated_at=now)
+            want_links_at_graduation(ctx, row)
         store.schedule_refresh(mint, now)
     if problem is None and ctx.safety:
         ctx.safety.request(mint, priority=2)

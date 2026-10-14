@@ -13,17 +13,44 @@ MINT = "So1Shadow11111111111111111111111111111111111"
 SAFE = {"chain_mint_authority": 0, "chain_freeze_authority": 0, "top10_pct": 18.0, "bot_volume": 0}
 
 
-def test_the_three_baselines_load_and_share_one_set_of_exits():
-    specs = shadow.load_strategies()
-    assert [s["id"] for s in specs] == ["every_graduation", "safety_only", "momentum_safety"]
-    assert {s["size_sol"] for s in specs} == {0.5} and {s["lane"] for s in specs} == {"B"}
-    exits = [{k: s[k] for k in ("take_profit", "trailing_stop_pct", "trailing_after_take_profit", "hard_stop_pct", "time_stop_s")} for s in specs]
-    assert exits[0] == exits[1] == exits[2] == {
-        "take_profit": [{"multiple": 2.0, "sell_fraction": 0.5}], "trailing_stop_pct": 30,
-        "trailing_after_take_profit": True, "hard_stop_pct": 40, "time_stop_s": 86400.0,
-    }
-    assert specs[0]["require"] == {} and specs[0]["min_after_s"] == 120
-    assert specs[2]["require"] == {**specs[1]["require"], "on_rising": True}
+IDS = ["every_graduation", "safety_only", "momentum_safety", "social_safety", "clean_deployer", "after_boost", "buyers_not_leaving",
+       "full_stack", "early_derisk", "no_progress_timeout"]
+DEFAULT_EXITS = {"take_profit": [{"multiple": 2.0, "sell_fraction": 0.5}], "trailing_stop_pct": 30,
+                 "trailing_after_take_profit": True, "hard_stop_pct": 40, "time_stop_s": 86400.0, "no_progress": None}
+
+
+def test_the_strategies_load_and_the_entry_strategies_share_one_set_of_exits():
+    specs = {s["id"]: s for s in shadow.load_strategies()}
+    assert list(specs) == IDS
+    assert {s["size_sol"] for s in specs.values()} == {0.5} and {s["lane"] for s in specs.values()} == {"B"}
+    exits = lambda s: {k: s[k] for k in DEFAULT_EXITS}
+    assert all(exits(specs[i]) == DEFAULT_EXITS for i in IDS[:8])
+    assert specs["every_graduation"]["require"] == {} and specs["every_graduation"]["min_after_s"] == 120
+    safety = specs["safety_only"]["require"]
+    assert specs["momentum_safety"]["require"] == {**safety, "on_rising": True}
+    # Every new entry strategy starts from the safety rules.
+    for i in IDS[3:8]:
+        assert specs[i]["require"].items() >= safety.items()
+    assert specs["full_stack"]["require"] == {**specs["social_safety"]["require"], **specs["clean_deployer"]["require"], **specs["buyers_not_leaving"]["require"]}
+    assert (specs["buyers_not_leaving"]["check_from_s"], specs["buyers_not_leaving"]["max_after_s"]) == (120, 300)
+    assert (specs["after_boost"]["check_from_s"], specs["after_boost"]["min_after_s"], specs["after_boost"]["max_after_s"]) == (600, 600, 1800)
+    # The exit experiments borrow Safety only's entry whole and change only the exits.
+    for i in ("early_derisk", "no_progress_timeout"):
+        assert specs[i]["entries_as"] == "safety_only"
+        assert {k: specs[i][k] for k in ("signal", "min_after_s", "max_after_s", "require")} == {k: specs["safety_only"][k] for k in ("signal", "min_after_s", "max_after_s", "require")}
+    assert exits(specs["early_derisk"]) == {**DEFAULT_EXITS, "take_profit": [{"multiple": 1.5, "sell_fraction": 0.5}], "trailing_stop_pct": 25, "hard_stop_pct": 30}
+    assert exits(specs["no_progress_timeout"]) == {**DEFAULT_EXITS, "no_progress": {"within_s": 600.0, "multiple": 1.2}}
+
+
+def test_same_as_must_name_a_strategy_with_its_own_entry(tmp_path):
+    exits = "exits: {hard_stop_pct: 40}\n"
+    (tmp_path / "a.yaml").write_text("size_sol: 0.5\nentry: {signal: migration}\n" + exits)
+    (tmp_path / "b.yaml").write_text("size_sol: 0.5\nentry: {same_as: a}\n" + exits)
+    assert shadow.load_strategies(tmp_path)[1]["entries_as"] == "a"
+    for bad in ("{same_as: missing}", "{same_as: b}", "{same_as: a, require: {on_rising: true}}"):
+        (tmp_path / "c.yaml").write_text(f"size_sol: 0.5\nentry: {bad}\n" + exits)
+        with pytest.raises(ValueError, match="same_as"):
+            shadow.load_strategies(tmp_path)
 
 
 def test_a_strategy_file_with_an_unknown_rule_is_refused(tmp_path):
@@ -33,7 +60,7 @@ def test_a_strategy_file_with_an_unknown_rule_is_refused(tmp_path):
 
 
 def test_rules_never_pass_on_missing_data():
-    safety, momentum = shadow.load_strategies()[1:]
+    safety, momentum = shadow.load_strategies()[1:3]
     assert shadow.rules_hold(safety, SAFE, T0, SHADOW)
     for missing in SAFE:
         assert not shadow.rules_hold(safety, {**SAFE, missing: None}, T0, SHADOW)
@@ -109,7 +136,9 @@ def engine(steps, *, row_extra=None, cfg=None):
                 if price is None:
                     shadow.on_miss(ctx, row, T0 + after)
                 else:
-                    shadow.on_snapshot(ctx, row, snap(price) if not isinstance(price, dict) else price, T0 + after)
+                    seen = snap(price) if not isinstance(price, dict) else price
+                    ctx.store.add_snapshot(MINT, T0 + after, "dexscreener", seen)    # as the DexScreener collector does first
+                    shadow.on_snapshot(ctx, row, seen, T0 + after)
         trades = {t["strategy"]: t for t in ctx.store.paper_trades_for(MINT)}
         fills = [dict(r) for r in ctx.store.db.execute("SELECT * FROM paper_fills ORDER BY id")]
         return trades, fills, row
@@ -175,7 +204,11 @@ def test_safety_and_momentum_signal_when_their_rules_hold_and_enter_at_the_next_
     ])
     assert trades["safety_only"]["signal_ts"] == T0 + 200 and trades["safety_only"]["entry_price"] == 1.20
     assert trades["momentum_safety"]["signal_price"] == 1.50 and trades["momentum_safety"]["entry_price"] == 1.60
-    assert [f["reason"] for f in fills] == ["entry"] * 3 and all(t["status"] == "open" for t in trades.values())
+    # The two exit experiments bought exactly what Safety only bought, when it bought it.
+    for i in ("early_derisk", "no_progress_timeout"):
+        assert {k: trades[i][k] for k in ("signal_ts", "entry_ts", "entry_price", "tokens")} == {k: trades["safety_only"][k] for k in ("signal_ts", "entry_ts", "entry_price", "tokens")}
+    assert set(trades) == {"every_graduation", "safety_only", "momentum_safety", "early_derisk", "no_progress_timeout"}
+    assert [f["reason"] for f in fills] == ["entry"] * 5 and all(t["status"] == "open" for t in trades.values())
     assert row["paper_refresh_s"] == SHADOW["refresh"]["fast_s"]
     # Too late: safety must come true within the first hour after graduation.
     trades, _, _ = engine([(125, 1.00), (3700, 1.10, SAFE), (3730, 1.20)])
@@ -223,18 +256,46 @@ def test_summary_numbers():
     assert empty["trades"] == 0 and empty["median_return_pct"] is None and empty["max_drawdown_sol"] == 0
 
 
+BEATS = {"benchmark": "Safety only", "is_benchmark": False, "trades": 300, "mean_return_pct": 4.0, "benchmark_trades": 280,
+         "benchmark_mean_return_pct": 1.0, "difference_pct": 3.0}
+BOTH_HALVES = {"first_trades": 150, "first_sol": 2.0, "second_trades": 150, "second_sol": 1.0}
+
+
 def test_gate_says_no_until_every_check_passes():
     gate_cfg = SHADOW["gate"]
+    gate = lambda summary, days, against=BEATS, parts=BOTH_HALVES: shadow.gate(summary, days, gate_cfg, against, parts)
     few = shadow.summarise([closed(i, 0.3) for i in range(20)])
-    assert shadow.gate(few, 3.0, gate_cfg)["status"] == "NOT ENOUGH DATA"
-    assert shadow.gate(shadow.summarise([]), 0.0, gate_cfg)["status"] == "NOT ENOUGH DATA"
+    assert gate(few, 3.0)["status"] == "NOT ENOUGH DATA"
+    assert gate(shadow.summarise([]), 0.0)["status"] == "NOT ENOUGH DATA"
     steady = shadow.summarise([closed(i, 0.05 if i % 2 else -0.02) for i in range(300)])
-    assert shadow.gate(steady, 25.0, gate_cfg)["status"] == "GO"
+    assert gate(steady, 25.0)["status"] == "GO"
     one_hit = shadow.summarise([closed(i, -0.01) for i in range(300)] + [closed(999, 50.0)])
-    result = shadow.gate(one_hit, 25.0, gate_cfg)                      # profitable, but only because of one trade
-    assert result["status"] == "NO-GO" and [c["ok"] for c in result["checks"]] == [True, True, True, True, False]
+    result = gate(one_hit, 25.0)                                        # profitable, but only because of one trade
+    assert result["status"] == "NO-GO" and [c["ok"] for c in result["checks"]] == [True, True, True, True, False, True, True]
     deep = shadow.summarise([closed(i, -0.2) for i in range(200)] + [closed(900 + i, 1.0) for i in range(100)])
-    assert [c["ok"] for c in shadow.gate(deep, 25.0, gate_cfg)["checks"]][3] is False   # median trade is -40%
+    assert [c["ok"] for c in gate(deep, 25.0)["checks"]][3] is False   # median trade is -40%
+    # Good on its own, but no better than Safety only, or all its profit came in one half.
+    worse = gate(steady, 25.0, against={**BEATS, "mean_return_pct": 0.5, "difference_pct": -0.5})
+    assert worse["status"] == "NO-GO" and worse["checks"][-1]["ok"] is False and "+0.5% against +1.0%" == worse["checks"][-1]["have"]
+    lopsided = gate(steady, 25.0, parts={**BOTH_HALVES, "second_sol": -0.4})
+    assert lopsided["status"] == "NO-GO" and lopsided["checks"][5]["ok"] is False
+    assert gate(steady, 25.0, parts={**BOTH_HALVES, "first_trades": 0, "first_sol": 0.0})["checks"][5]["ok"] is False
+    assert gate(steady, 25.0, against={**BEATS, "benchmark_trades": 0, "benchmark_mean_return_pct": None, "difference_pct": None})["checks"][-1]["have"] == "none yet"
+    # Safety only is the benchmark and is not asked to beat itself.
+    assert gate(steady, 25.0, against={**BEATS, "is_benchmark": True})["status"] == "GO"
+
+
+def test_versus_and_halves():
+    def t(signal_ts, closed_at, pct, status="closed"):
+        return {"status": status, "signal_ts": signal_ts, "closed_at": closed_at, "return_pct": pct, "pnl_sol": pct / 200}
+    own = [t(T0 + 10, T0 + 20, 10.0), t(T0 + 600, T0 + 700, -2.0), t(T0 + 800, None, 0.0, "open")]
+    bench = [t(T0 - 500, T0 - 400, 50.0), t(T0 + 20, T0 + 30, 1.0), t(T0 + 40, T0 + 50, 3.0)]
+    v = shadow.versus(own, T0, bench, T0 - 1000, "Safety only", False)
+    assert (v["since"], v["trades"], v["benchmark_trades"]) == (T0, 2, 2)    # the benchmark's trade from before T0 is left out
+    assert (v["mean_return_pct"], v["benchmark_mean_return_pct"], v["difference_pct"]) == (4.0, 2.0, 2.0)
+    assert shadow.versus(own, None, bench, T0, "Safety only", False)["trades"] == 0
+    h = shadow.halves(own, T0, T0 + 1000)
+    assert (h["split_at"], h["first_trades"], h["first_sol"], h["second_trades"], h["second_sol"]) == (T0 + 500, 1, 0.05, 1, -0.01)
 
 
 def test_report_for_the_page():
@@ -253,7 +314,7 @@ def test_report_for_the_page():
         return shadow.report(ctx.store.db, ctx.cfg, shadow.strategies(ctx), T0 + 400)
 
     report, _, _ = run(lambda request: None, flow)
-    first, second, third = report["strategies"]
+    first, second, third = report["strategies"][:3]
     assert first["days"] == pytest.approx(1.0, abs=0.01) and first["name"] == "Every graduation" and first["version"] == 1
     assert first["trades"] == 1 and first["open"] == 1 and first["exits"] == {"hard_stop": 1} and first["gate"]["status"] == "NOT ENOUGH DATA"
     assert first["open_marked_sol"] == pytest.approx(0.5 * 1.2 * (1 - 0.003) / 1.015 - 0.501005, abs=0.0005)
@@ -318,7 +379,9 @@ def test_trades_affected_by_an_outage_are_reported_apart_and_kept_out_of_the_gat
     assert s["trades"] == 250 and s["profit_sol"] == pytest.approx(5.0) and len(s["curve"]) == 250
     assert s["affected"]["trades"] == 40 and s["affected"]["profit_sol"] == pytest.approx(-20.0) and s["affected"]["median_return_pct"] == pytest.approx(-100)
     assert s["all"] == {"trades": 290, "profit_sol": pytest.approx(-15.0)}
-    assert s["gate"]["status"] == "GO"                                  # judged on the 250 watched trades only
+    # Judged on the 250 watched trades only. (It still fails the last two checks: Safety only has no trades to
+    # beat, and every trade closed in the second half of the 30 days.)
+    assert [c["ok"] for c in s["gate"]["checks"]] == [True] * 5 + [False, False]
     assert s["open"] == 2 and s["open_affected"] == 1
     assert sum(t["affected"] for t in s["recent"]) >= 1 and report["assumptions"]["outage_gap_s"] == 300
 
@@ -403,7 +466,7 @@ def test_a_migrate_message_alone_does_not_make_a_graduation():
     ]
     for extra in not_ours:
         assert engine(prices, row_extra=extra)[0] == {}
-    assert set(engine(prices)[0]) == {"every_graduation", "safety_only"}
+    assert set(engine(prices)[0]) == {"every_graduation", "safety_only", "early_derisk", "no_progress_timeout"}
 
     async def excluded(ctx):
         begin(ctx.store, T0 - 10, ctx.cfg)
@@ -465,7 +528,7 @@ def test_rules_versions_are_per_strategy_and_start_by_themselves(tmp_path):
             return {k: v["version"] for k, v in shadow.versions(ctx, now).items()}, shadow.versions(ctx, now)
 
         first, detail = restart(T0 + 1000)
-        assert first == {"every_graduation": 2, "safety_only": 1, "momentum_safety": 1}   # old trades became version 1
+        assert first == {i: 2 if i == "every_graduation" else 1 for i in IDS}   # old trades became version 1
         assert detail["every_graduation"]["started_at"] == T0 + 1000 and store.strategy_versions("every_graduation")[0]["started_at"] == T0
         assert restart(T0 + 2000)[0] == first                        # nothing changed: nothing restarts
         assert shadow.versions(ctx, T0 + 2000)["safety_only"]["started_at"] == T0 + 1000
@@ -477,7 +540,8 @@ def test_rules_versions_are_per_strategy_and_start_by_themselves(tmp_path):
         (folder / "momentum_safety.yaml").write_text(text.replace("name: Momentum + safety", "name: Momentum and safety"))
         (folder / "zz_new.yaml").write_text((folder / "every_graduation.yaml").read_text().replace("order: 1", "order: 9"))
         second, detail = restart(T0 + 3000)
-        assert second == {"every_graduation": 2, "safety_only": 2, "momentum_safety": 1, "zz_new": 1}
+        # The two exit experiments borrow Safety only's entry, so they move with it.
+        assert second == {**first, "safety_only": 2, "early_derisk": 2, "no_progress_timeout": 2, "zz_new": 1}
         assert detail["every_graduation"]["started_at"] == T0 + 1000 and detail["momentum_safety"]["started_at"] == T0 + 1000   # clocks kept
         assert detail["safety_only"]["started_at"] == detail["zz_new"]["started_at"] == T0 + 3000
 
@@ -492,7 +556,7 @@ def test_rules_versions_are_per_strategy_and_start_by_themselves(tmp_path):
         ctx.cfg["shadow"]["entry_limits"] = {**ctx.cfg["shadow"]["entry_limits"], "min_liquidity_usd": 8000}
         pending = shadow.report(store.db, ctx.cfg, shadow.strategies(ctx), T0 + 4000)   # changed, not restarted yet
         third, _ = restart(T0 + 5000)
-        assert third == {"every_graduation": 3, "safety_only": 3, "momentum_safety": 2, "zz_new": 2}
+        assert third == {k: v + 1 for k, v in second.items()}
         # Settings that do not change what a trade does start nothing.
         ctx.cfg["shadow"]["gate"] = {**ctx.cfg["shadow"]["gate"], "min_days": 30}
         ctx.cfg["shadow"]["refresh"] = {**ctx.cfg["shadow"]["refresh"], "slow_s": 90}
@@ -526,3 +590,108 @@ def test_old_databases_get_the_version_column_with_existing_trades_as_version_on
     (old,) = store.paper_trades_for("OLD")
     assert old["rules_version"] == 1 and old["entry_json"] is None
     store.close()
+
+
+def test_social_rules_need_the_links_themselves():
+    social = {s["id"]: s for s in shadow.load_strategies()}["social_safety"]
+    links = {"telegram": "https://t.me/x", "twitter": "https://x.com/x"}
+    assert shadow.rules_hold(social, {**SAFE, **links}, T0, SHADOW)
+    assert shadow.rules_hold(social, {**SAFE, "telegram": "https://t.me/x", "website": "https://x.fun"}, T0, SHADOW)
+    assert not shadow.rules_hold(social, {**SAFE, "twitter": "https://x.com/x", "website": "https://x.fun"}, T0, SHADOW)   # no Telegram
+    assert not shadow.rules_hold(social, {**SAFE, "telegram": "https://t.me/x"}, T0, SHADOW)
+    assert not shadow.rules_hold(social, {**links, "top10_pct": 31.0, "chain_mint_authority": 0, "chain_freeze_authority": 0, "bot_volume": 0}, T0, SHADOW)
+
+
+def test_deployer_record_and_the_clean_deployer_rule():
+    from radar.db.store import Store
+
+    store = Store(":memory:")
+    day = 86400
+    # Wallet A: 5 launches, 4 of them more than 7 days before, one graduated before the token we look at.
+    for i, ago in enumerate((20 * day, 15 * day, 12 * day, 9 * day, 3600)):
+        store.upsert_token(f"A{i}", source="pumpportal", first_seen_at=T0 - ago, created_at=T0 - ago, creator="WalletA", launchpad="pump.fun", bonding_curve="c")
+    store.update_state("A1", migrated_at=T0 - 14 * day)
+    store.update_state("A4", migrated_at=T0)                       # the token being traded
+    # Wallet S: 12 launches this week, none graduated; a token another source told us about does not count.
+    for i in range(12):
+        store.upsert_token(f"S{i}", source="pumpportal", first_seen_at=T0 - i * 3600, created_at=T0 - i * 3600, creator="WalletS")
+    store.upsert_token("SX", source="dexscreener", first_seen_at=T0, created_at=T0, creator="WalletS")
+    a = store.deployer("WalletA", "A4", T0, T0 + 300, 7 * day)
+    assert (a["creator_launches"], a["creator_launches_recent"], a["creator_earlier_graduations"], a["creator_first_seen_at"]) == (5, 1, 1, T0 - 20 * day)
+    s = store.deployer("WalletS", "S0", T0, T0 + 300, 7 * day)
+    assert (s["creator_launches"], s["creator_launches_recent"], s["creator_earlier_graduations"]) == (12, 12, 0)
+    assert store.deployer(None, "X", T0, T0, 7 * day) == {} and store.deployer("Nobody", "X", T0, T0, 7 * day) == {}
+    # The token's own graduation is not an "earlier" one, and neither is one that came after it.
+    store.update_state("A2", migrated_at=T0 + 100)
+    assert store.deployer("WalletA", "A4", T0, T0 + 300, 7 * day)["creator_earlier_graduations"] == 1
+    # The deployers table, one row per creator wallet.
+    rows = {r["creator"]: dict(r) for r in store.db.execute("SELECT * FROM deployers")}
+    assert (rows["WalletA"]["launches"], rows["WalletA"]["graduations"], rows["WalletS"]["launches"], rows["WalletS"]["graduations"]) == (5, 3, 12, 0)
+
+    want = {"max_recent_launches": 3, "or_earlier_graduations": 1, "never_launches_without_graduation": 10}
+    ok = lambda **kw: shadow.RULES["clean_deployer"]({"creator_launches": 1, "creator_launches_recent": 1, "creator_earlier_graduations": 0, **kw}, want, T0, SHADOW)
+    assert ok() and ok(creator_launches=3, creator_launches_recent=3)
+    assert not ok(creator_launches=4, creator_launches_recent=4)                                  # busy this week, nothing graduated
+    assert ok(creator_launches=8, creator_launches_recent=8, creator_earlier_graduations=1)       # busy, but has graduated one
+    assert not ok(creator_launches=10, creator_launches_recent=2)                                 # 10 launches, none graduated: never
+    assert ok(creator_launches=10, creator_launches_recent=2, creator_earlier_graduations=1)
+    assert not shadow.RULES["clean_deployer"]({}, want, T0, SHADOW)                              # no record: not a pass
+    store.close()
+
+
+def test_buyers_not_leaving_looks_only_between_two_and_five_minutes():
+    def flow(price, buys, sells, chg):
+        return {**snap(price), "buys_m5": buys, "sells_m5": sells, "price_chg_m5": chg}
+
+    # Good at 100 s (too early to look), and again at 130 s: signal at 130, entry at the next price.
+    trades, _, _ = engine([(100, flow(1.0, 30, 10, 5.0), SAFE), (130, flow(1.1, 30, 20, 2.0)), (150, flow(1.2, 30, 20, 2.0))])
+    t = trades["buyers_not_leaving"]
+    assert (t["signal_ts"], t["entry_ts"], t["entry_price"]) == (T0 + 130, T0 + 150, 1.2)
+    # Not good enough until after five minutes: no trade.
+    trades, _, _ = engine([(130, flow(1.0, 14, 10, 1.0), SAFE), (200, flow(1.0, 30, 10, 0.0)), (310, flow(1.0, 30, 10, 5.0)), (330, 1.0)])
+    assert "buyers_not_leaving" not in trades
+    assert not shadow.RULES["min_buys_per_sell_m5"]({"buys_m5": 0, "sells_m5": 0}, 1.5, T0, SHADOW)
+    assert not shadow.RULES["min_buys_per_sell_m5"]({"buys_m5": 10, "sells_m5": None}, 1.5, T0, SHADOW)
+
+
+def test_after_the_boost_compares_with_the_graduation_price_and_the_liquidity_peak():
+    def at(price, liquidity, buys=20, sells=10):
+        return {**snap(price, liquidity=liquidity), "buys_m5": buys, "sells_m5": sells}
+
+    start = [(30, at(1.00, 50_000.0), SAFE), (300, at(1.30, 60_000.0))]
+    trades, _, _ = engine(start + [(500, at(1.2, 55_000.0)), (610, at(1.05, 50_000.0)), (630, at(1.06, 50_000.0))])
+    t = trades["after_boost"]
+    assert (t["signal_ts"], t["entry_ts"]) == (T0 + 610, T0 + 630)      # not at 500: rules are only looked at from 10 minutes
+    import json
+    saw = json.loads(t["signal_json"])
+    assert (saw["graduation_price"], saw["liquidity_peak"]) == (1.00, 60_000.0)
+    for late in (at(0.98, 55_000.0), at(1.10, 47_000.0), at(1.10, 55_000.0, buys=9)):          # below graduation price; liquidity -22%; sells win
+        assert "after_boost" not in engine(start + [(610, late), (630, late)])[0]
+    assert "after_boost" not in engine(start + [(1810, at(1.2, 60_000.0)), (1830, at(1.2, 60_000.0))])[0]   # after 30 minutes
+    # The first PumpSwap price came more than 3 minutes after graduation: the graduation price is unknown.
+    assert "after_boost" not in engine([(200, at(1.0, 50_000.0), SAFE), (610, at(1.2, 55_000.0)), (630, at(1.2, 55_000.0))])[0]
+
+
+def test_no_progress_timeout_sells_a_position_that_has_not_reached_1_2x_in_10_minutes():
+    trades, fills, _ = engine([(125, 1.00, SAFE), (150, 1.00), (400, 1.15), (760, 1.10), (780, 1.05)])
+    e2 = trades["no_progress_timeout"]
+    assert (e2["status"], e2["exit_reason"], e2["closed_at"]) == ("closed", "no_progress", T0 + 780)
+    assert trades["safety_only"]["status"] == "open" and trades["early_derisk"]["status"] == "open"
+    trades, _, _ = engine([(125, 1.00, SAFE), (150, 1.00), (400, 1.25), (760, 1.10), (780, 1.05)])      # got to 1.25x in time
+    assert trades["no_progress_timeout"]["status"] == "open"
+    # E1 takes half at 1.5x where the others wait for 2x, and stops out at -30% where they wait for -40%.
+    trades, fills, _ = engine([(125, 1.00, SAFE), (150, 1.00), (300, 1.55), (320, 1.55), (400, 0.68), (420, 0.66)])
+    assert trades["early_derisk"]["steps_done"] == 1 and trades["safety_only"]["steps_done"] == 0
+    trades, _, _ = engine([(125, 1.00, SAFE), (150, 1.00), (300, 0.68), (320, 0.66)])
+    assert trades["early_derisk"]["exit_reason"] == "hard_stop" and trades["safety_only"]["status"] == "open"
+
+
+def test_socials_and_deployer_stats_are_saved_with_each_trade():
+    import json
+
+    trades, _, _ = engine([(125, 1.00, {**SAFE, "telegram": "https://t.me/p", "twitter": "https://x.com/p", "creator": "Dev"}), (150, 1.0)])
+    for t in trades.values():
+        saw = json.loads(t["entry_json"])
+        assert (saw["telegram"], saw["twitter"], saw["website"], saw["creator"]) == ("https://t.me/p", "https://x.com/p", None, "Dev")
+        assert saw["creator_launches"] is None and saw["graduation_price"] == 1.0     # no launches by "Dev" are stored here
+    assert "social_safety" in trades

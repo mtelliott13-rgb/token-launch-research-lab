@@ -1,0 +1,31 @@
+# 5. Safety only, plus the creator wallet is not a serial launcher. Its record is built from
+# every PumpPortal create event we have stored (the deployers table), so it only goes back to
+# 2026-10-08 and misses launches made while the app was off or the computer asleep.
+name: Clean deployer
+lane: B
+order: 5
+description: The safety rules, plus the creator launched 3 or fewer tokens in the last 7 days or has graduated one before, and is never a 10+ launch wallet with no graduation.
+size_sol: 0.5
+
+entry:
+  signal: rules
+  min_minutes_after_migration: 2
+  max_minutes_after_migration: 60
+  require:
+    mint_revoked_onchain: true      # the Safety only rules
+    freeze_revoked_onchain: true
+    max_top10_pct: 30
+    no_bot_volume: true
+    clean_deployer:
+      max_recent_launches: 3                # launches in the last 7 days, this token included
+      or_earlier_graduations: 1             # ...or at least this many of its earlier tokens graduated
+      never_launches_without_graduation: 10 # never: this many launches and none graduated before
+
+# Default exits, the same as the baselines.
+exits:
+  take_profit:
+    - {multiple: 2, sell_fraction: 0.5}   # sell half at 2x the entry price
+  trailing_stop_pct: 30                   # on the rest: sell when 30% below the highest price since entry
+  trailing_after_take_profit: true        # the trailing stop only starts once the first half is sold
+  hard_stop_pct: 40                       # sell everything 40% below the entry price
+  time_stop_hours: 24                     # sell whatever is left 24 hours after entry

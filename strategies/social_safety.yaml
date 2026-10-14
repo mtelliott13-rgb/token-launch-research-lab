@@ -1,0 +1,29 @@
+# 4. Safety only, plus the creator listed a Telegram group and an X account or a website.
+# The links come from DexScreener and from the token's own metadata file. Anyone can paste any
+# link there; this only checks that one is listed.
+name: Social + safety
+lane: B
+order: 4
+description: The safety rules, plus a Telegram link and an X link or a website.
+size_sol: 0.5
+
+entry:
+  signal: rules
+  min_minutes_after_migration: 2
+  max_minutes_after_migration: 60
+  require:
+    mint_revoked_onchain: true      # the Safety only rules
+    freeze_revoked_onchain: true
+    max_top10_pct: 30
+    no_bot_volume: true
+    has_telegram: true
+    has_x_or_website: true
+
+# Default exits, the same as the baselines.
+exits:
+  take_profit:
+    - {multiple: 2, sell_fraction: 0.5}   # sell half at 2x the entry price
+  trailing_stop_pct: 30                   # on the rest: sell when 30% below the highest price since entry
+  trailing_after_take_profit: true        # the trailing stop only starts once the first half is sold
+  hard_stop_pct: 40                       # sell everything 40% below the entry price
+  time_stop_hours: 24                     # sell whatever is left 24 hours after entry

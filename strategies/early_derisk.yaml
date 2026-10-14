@@ -1,0 +1,18 @@
+# Exit experiment E1. Exactly the entries of Safety only (same tokens, same moments, the same
+# dropped entries), with earlier and tighter exits.
+name: "E1: Early de-risk"
+lane: B
+order: 9
+description: Safety only's entries. Sell half at 1.5x, 25% trailing stop on the rest, -30% hard stop, 24h time stop.
+size_sol: 0.5
+
+entry:
+  same_as: safety_only
+
+exits:
+  take_profit:
+    - {multiple: 1.5, sell_fraction: 0.5}
+  trailing_stop_pct: 25
+  trailing_after_take_profit: true
+  hard_stop_pct: 30
+  time_stop_hours: 24

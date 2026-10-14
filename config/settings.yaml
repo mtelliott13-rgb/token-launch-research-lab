@@ -196,7 +196,8 @@ shadow:
     extra_pct: 1.0                # and lose a further 1% each way to the price moving before we land
   # Rules versions are per strategy and automatic: change a file in strategies/ and that
   # strategy starts a new version at the next restart; change fees, slippage, entry_limits,
-  # entry_fail_pct, exit_late_pct, max_entry_wait_s, no_price_misses or rising_fresh_s below
+  # entry_fail_pct, exit_late_pct, max_entry_wait_s, no_price_misses, rising_fresh_s,
+  # graduation_price_within_s or deployer_window_days below
   # and every strategy does. Only a strategy's current version counts toward its headline
   # figures and its go / no-go gate. Changing refresh, outage_gap_s or gate starts nothing.
   # An entry is skipped, and recorded as failed with the reason "slippage limit", when the pool
@@ -216,6 +217,10 @@ shadow:
   outage_gap_s: 300
   no_price_misses: 10             # this many lookups in a row with no price: the rest is written off at zero
   rising_fresh_s: 30              # "on Rising" means seen on the list within this long
+  # "Price at graduation" is the first PumpSwap price we get within this long of the graduation.
+  # Later than that and it is unknown, and a rule that needs it does not pass.
+  graduation_price_within_s: 180
+  deployer_window_days: 7         # "recent launches" by a creator wallet are those in this many days
   # How often DexScreener is asked for a token with a paper position, so stops are applied.
   refresh:
     fast_s: 20                    # while an entry is waiting and for the first hour of a position
@@ -227,6 +232,9 @@ shadow:
     min_trades: 200
     median_min_pct: -10           # the median trade may not be worse than this
     drop_best: 2                  # still profitable with this many best trades removed
+    # A strategy must also have a higher mean return per trade than this one (a file in
+    # strategies/) over the time both ran their current rules, and a profit in each half of its own time.
+    benchmark: safety_only
 
 # How often each token's pair data is re-fetched from DexScreener (seconds).
 # A token that matches no rule stops being refreshed; the follow-up checks above still happen.

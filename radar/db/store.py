@@ -118,6 +118,15 @@ class Store:
             self.db.execute("ALTER TABLE outcomes DROP COLUMN label")
         for statement in ADDED_INDEXES:
             self.db.execute(statement)
+        # Deployer table: one row per creator wallet. A view, so it is always the current count.
+        self.db.execute("DROP VIEW IF EXISTS deployers")
+        self.db.execute(
+            "CREATE VIEW deployers AS SELECT t.creator AS creator, COUNT(*) AS launches, "
+            f"SUM(CASE WHEN {GRADUATED_SQL} THEN 1 ELSE 0 END) AS graduations, "
+            "MIN(t.created_at) AS first_seen_at, MAX(t.created_at) AS last_seen_at "
+            "FROM tokens t JOIN token_state s ON s.mint = t.mint "
+            "WHERE t.creator IS NOT NULL AND t.source = 'pumpportal' GROUP BY t.creator"
+        )
 
     @contextmanager
     def tx(self):
@@ -350,6 +359,36 @@ class Store:
             (strategy, version, fingerprint, started_at),
         )
 
+    def deployer(self, creator: str | None, mint: str, before: float, now: float, window_s: float) -> dict[str, Any]:
+        """A creator wallet's record in our own data, as it stood when `mint` graduated at `before`.
+
+        Launches are PumpPortal create events. Earlier graduations are the creator's other
+        tokens that graduated before this one. We only know what we were running to see.
+        """
+        if not creator:
+            return {}
+        row = self.db.execute(
+            f"SELECT COUNT(*), SUM(t.created_at >= ?), SUM(t.mint != ? AND {GRADUATED_SQL} AND (s.migrated_at IS NULL OR s.migrated_at < ?)), "
+            "MIN(t.created_at), MAX(t.created_at) FROM tokens t JOIN token_state s ON s.mint = t.mint "
+            "WHERE t.creator = ? AND t.source = 'pumpportal' AND t.created_at <= ?",
+            (now - window_s, mint, before, creator, now),
+        ).fetchone()
+        if not row[0]:
+            return {}
+        return {"creator_launches": row[0], "creator_launches_recent": row[1] or 0, "creator_earlier_graduations": row[2] or 0,
+                "creator_first_seen_at": row[3], "creator_last_seen_at": row[4]}
+
+    def since_graduation(self, mint: str, migrated_at: float, within_s: float, dex_ids: Iterable[str]) -> tuple[float | None, float | None]:
+        """(the first price from the launchpad's pool within `within_s` of graduating, the pool's highest liquidity since)."""
+        dex_ids = list(dex_ids)
+        pools = f"source = 'dexscreener' AND dex_id IN ({', '.join('?' * len(dex_ids))})"
+        first = self.db.execute(
+            f"SELECT price_usd FROM snapshots WHERE mint = ? AND ts >= ? AND ts <= ? AND {pools} AND price_usd IS NOT NULL ORDER BY ts LIMIT 1",
+            (mint, migrated_at, migrated_at + within_s, *dex_ids),
+        ).fetchone()
+        peak = self.db.execute(f"SELECT MAX(liquidity_usd) FROM snapshots WHERE mint = ? AND ts >= ? AND {pools}", (mint, migrated_at, *dex_ids)).fetchone()
+        return (first[0] if first else None), peak[0]
+
     def graduated_unchecked(self, since: float, limit: int) -> list[dict[str, Any]]:
         """Tokens we saw graduate since `since` whose authorities have not been read from the chain."""
         cur = self.db.execute(
@@ -378,10 +417,10 @@ class Store:
     # ---- descriptions ---------------------------------------------------------
 
     def description_candidates(self, now: float, limit: int) -> list[dict[str, Any]]:
-        """Tokens whose description is waiting to be fetched, newest first."""
+        """Tokens whose description is waiting to be fetched, newest first; a token that just graduated counts as new."""
         cur = self.db.execute(
             f"{ROW_SQL} WHERE s.desc_state = 'wanted' AND (s.desc_retry_at IS NULL OR s.desc_retry_at <= ?) "
-            "ORDER BY t.first_seen_at DESC LIMIT ?",
+            "ORDER BY COALESCE(s.migrated_at, t.first_seen_at) DESC LIMIT ?",
             (now, limit),
         )
         return [dict(r) for r in cur]

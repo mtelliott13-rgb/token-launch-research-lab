@@ -1,0 +1,31 @@
+# 6. Safety only, plus the graduation pump has not faded: from 10 to 30 minutes after
+# graduation, the price is still at or above its first PumpSwap price, buyers keep up with
+# sellers, and the pool has not lost more than 20% of its liquidity.
+name: After the boost
+lane: B
+order: 6
+description: The safety rules, and 10 to 30 minutes after graduation the price is at or above its graduation price, 5-minute buys at least match sells, and liquidity is within 20% of its peak.
+size_sol: 0.5
+
+entry:
+  signal: rules
+  rules_checked_from_minutes: 10    # the rules are not looked at before this
+  min_minutes_after_migration: 10
+  max_minutes_after_migration: 30   # no signal after this
+  require:
+    mint_revoked_onchain: true      # the Safety only rules
+    freeze_revoked_onchain: true
+    max_top10_pct: 30
+    no_bot_volume: true
+    min_price_vs_graduation: 1.0    # price at least 1.0x the first PumpSwap price after graduation
+    min_buys_per_sell_m5: 1.0       # 5-minute buys at least equal 5-minute sells
+    max_liquidity_drop_pct: 20      # liquidity at least 80% of its highest since graduation
+
+# Default exits, the same as the baselines.
+exits:
+  take_profit:
+    - {multiple: 2, sell_fraction: 0.5}   # sell half at 2x the entry price
+  trailing_stop_pct: 30                   # on the rest: sell when 30% below the highest price since entry
+  trailing_after_take_profit: true        # the trailing stop only starts once the first half is sold
+  hard_stop_pct: 40                       # sell everything 40% below the entry price
+  time_stop_hours: 24                     # sell whatever is left 24 hours after entry

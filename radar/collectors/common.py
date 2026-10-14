@@ -88,6 +88,17 @@ def want_description(ctx: Ctx, row: dict[str, Any]) -> None:
         ctx.store.update_state(row["mint"], desc_state="wanted")
 
 
+def want_links_at_graduation(ctx: Ctx, row: dict[str, Any] | None) -> None:
+    """Read a graduating token's metadata file (again) for its social links, which the shadow bot's rules use.
+
+    Files read before links were kept (2026-10-13) gave only the description. Once per
+    graduation, so at most one extra read per token.
+    """
+    if row and row.get("metadata_uri") and not row.get("telegram") and row.get("desc_state") in (None, "done", "none"):
+        row["desc_state"] = "wanted"
+        ctx.store.update_state(row["mint"], desc_state="wanted", desc_retry_at=None)
+
+
 def publish_tokens(ctx: Ctx, mints: list[str], now: float) -> None:
     """Push the current state of these tokens to open dashboard tabs."""
     if mints:

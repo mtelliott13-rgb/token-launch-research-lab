@@ -1,0 +1,23 @@
+# Exit experiment E2. Exactly the entries of Safety only, with the default exits plus a
+# timeout: if the price has not reached 1.2x the entry price within 10 minutes, sell it all.
+# "Reached" means at one of our price checks (every 20 seconds or so); a spike between two
+# checks is not seen.
+name: "E2: No-progress timeout"
+lane: B
+order: 10
+description: Safety only's entries, default exits, and sell everything if the price has not reached 1.2x within 10 minutes.
+size_sol: 0.5
+
+entry:
+  same_as: safety_only
+
+exits:
+  take_profit:
+    - {multiple: 2, sell_fraction: 0.5}
+  trailing_stop_pct: 30
+  trailing_after_take_profit: true
+  hard_stop_pct: 40
+  time_stop_hours: 24
+  no_progress:
+    within_minutes: 10
+    min_multiple: 1.2

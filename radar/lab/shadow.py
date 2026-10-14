@@ -41,7 +41,8 @@ START_KEY = "shadow_started_at"                    # when paper trading first be
 #   2 = slippage limit; only verified pump.fun graduations are traded (2026-10-13)
 ENGINE_RULES = 2
 # The shared settings that change what a trade does. Changing one starts a new version of every strategy.
-RULE_SETTINGS = ("fees", "slippage", "entry_limits", "entry_fail_pct", "exit_late_pct", "max_entry_wait_s", "no_price_misses", "rising_fresh_s")
+RULE_SETTINGS = ("fees", "slippage", "entry_limits", "entry_fail_pct", "exit_late_pct", "max_entry_wait_s", "no_price_misses", "rising_fresh_s",
+                 "graduation_price_within_s", "deployer_window_days")
 # Token and market fields the engine saw, saved with each trade at the signal and at the entry.
 SEEN_ROW = (
     "top10_pct", "top_holder_pct", "lp_locked_pct", "risk_score", "total_holders", "rugged", "safety_ts",
@@ -49,6 +50,9 @@ SEEN_ROW = (
     "chain_mint_authority", "chain_freeze_authority", "chain_checked_at",
     "bot_volume", "score", "vol_accel", "buy_pressure", "txn_growth", "rising_seen_at", "trending_seen_at",
     "boost_seen_at", "mayhem_mode", "theme", "launchpad", "created_at", "initial_buy_sol",
+    "twitter", "telegram", "website", "desc_state",
+    "creator", "creator_launches", "creator_launches_recent", "creator_earlier_graduations", "creator_first_seen_at", "creator_last_seen_at",
+    "graduation_price", "liquidity_peak",
 )
 SEEN_SNAP = (
     "price_usd", "mcap", "liquidity_usd", "vol_m5", "vol_h1", "vol_h24", "buys_m5", "sells_m5", "buys_h1", "sells_h1",
@@ -63,12 +67,21 @@ def load_strategies(directory: str | Path | None = None) -> list[dict[str, Any]]
     """Every strategies/*.yaml, in their `order`. The file name (without .yaml) is the strategy's id."""
     folder = Path(directory or "strategies")
     folder = folder if folder.is_absolute() else ROOT / folder
-    out = []
+    out, files = [], {}
     for path in sorted(folder.glob("*.yaml")):
         with open(path) as f:
-            spec = yaml.safe_load(f) or {}
+            files[path] = yaml.safe_load(f) or {}
+    by_id = {path.stem: spec for path, spec in files.items()}
+    for path, spec in files.items():
         try:
             entry, exits = spec["entry"], spec["exits"]
+            # `same_as` borrows another strategy's whole entry, so two files differ only in their exits.
+            like = entry.get("same_as")
+            if like is not None:
+                if set(entry) != {"same_as"} or like not in by_id or "same_as" in by_id[like]["entry"]:
+                    raise ValueError("same_as must stand alone and name another strategy file that has its own entry rules")
+                entry = by_id[like]["entry"]
+            progress = exits.get("no_progress")
             strategy = {
                 "id": path.stem,
                 "name": str(spec.get("name") or path.stem),
@@ -77,7 +90,9 @@ def load_strategies(directory: str | Path | None = None) -> list[dict[str, Any]]
                 "description": str(spec.get("description") or ""),
                 "size_sol": float(spec["size_sol"]),
                 "signal": entry.get("signal", "rules"),
+                "entries_as": like,
                 "min_after_s": float(entry.get("min_minutes_after_migration", 0)) * 60,
+                "check_from_s": float(entry.get("rules_checked_from_minutes", 0)) * 60,
                 "max_after_s": float(entry["max_minutes_after_migration"]) * 60 if entry.get("max_minutes_after_migration") else None,
                 "require": dict(entry.get("require") or {}),
                 "take_profit": sorted(
@@ -88,7 +103,11 @@ def load_strategies(directory: str | Path | None = None) -> list[dict[str, Any]]
                 "trailing_after_take_profit": bool(exits.get("trailing_after_take_profit", False)),
                 "hard_stop_pct": exits.get("hard_stop_pct"),
                 "time_stop_s": float(exits["time_stop_hours"]) * 3600 if exits.get("time_stop_hours") else None,
+                "no_progress": {"within_s": float(progress["within_minutes"]) * 60, "multiple": float(progress["min_multiple"])} if progress else None,
             }
+            deployer = strategy["require"].get("clean_deployer")
+            if deployer is not None and (not isinstance(deployer, dict) or set(deployer) != set(DEPLOYER_KEYS)):
+                raise ValueError(f"clean_deployer needs exactly {list(DEPLOYER_KEYS)}")
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"{path.name} is not a valid strategy file: {exc!r}") from exc
         unknown = set(strategy["require"]) - set(RULES)
@@ -100,8 +119,38 @@ def load_strategies(directory: str | Path | None = None) -> list[dict[str, Any]]
     return sorted(out, key=lambda s: (s["order"], s["id"]))
 
 
+DEPLOYER_KEYS = ("max_recent_launches", "or_earlier_graduations", "never_launches_without_graduation")
+
+
+def _clean_deployer(row: Mapping[str, Any], want: Mapping[str, float], now: float, cfg: Mapping[str, Any]) -> bool:
+    """Few recent launches or a graduation already behind them, and never a serial launcher with none."""
+    launches, recent, graduated = (row.get(k) for k in ("creator_launches", "creator_launches_recent", "creator_earlier_graduations"))
+    if launches is None or recent is None or graduated is None:
+        return False
+    if launches >= want["never_launches_without_graduation"] and graduated == 0:
+        return False
+    return recent <= want["max_recent_launches"] or graduated >= want["or_earlier_graduations"]
+
+
 # Each rule answers True only when the data says so. Unknown is never a pass.
+# `row` is everything known about the token at this price: see `facts`.
 RULES = {
+    "has_telegram": lambda row, want, now, cfg: bool(row.get("telegram")) == bool(want),
+    "has_x_or_website": lambda row, want, now, cfg: bool(row.get("twitter") or row.get("website")) == bool(want),
+    "clean_deployer": _clean_deployer,
+    # 5-minute buys are at least this many times the 5-minute sells (and there are buys at all).
+    "min_buys_per_sell_m5": lambda row, want, now, cfg: (
+        row.get("buys_m5") is not None and row.get("sells_m5") is not None and row["buys_m5"] > 0 and row["buys_m5"] >= want * row["sells_m5"]
+    ),
+    "price_up_m5": lambda row, want, now, cfg: row.get("price_chg_m5") is not None and (row["price_chg_m5"] > 0) == bool(want),
+    # The price now against the first PumpSwap price after graduation.
+    "min_price_vs_graduation": lambda row, want, now, cfg: (
+        bool(row.get("graduation_price")) and row.get("price_usd") is not None and row["price_usd"] >= want * row["graduation_price"]
+    ),
+    # Pool liquidity now against its highest value since graduation.
+    "max_liquidity_drop_pct": lambda row, want, now, cfg: (
+        bool(row.get("liquidity_peak")) and row.get("liquidity_usd") is not None and row["liquidity_usd"] >= row["liquidity_peak"] * (1 - want / 100)
+    ),
     "mint_revoked_onchain": lambda row, want, now, cfg: (row.get("chain_mint_authority") == 0) == bool(want),
     "freeze_revoked_onchain": lambda row, want, now, cfg: (row.get("chain_freeze_authority") == 0) == bool(want),
     "max_top10_pct": lambda row, want, now, cfg: row.get("top10_pct") is not None and row["top10_pct"] < want,
@@ -122,7 +171,8 @@ def fingerprint(strategy: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
     It changes when any of those change, and only then: renaming a strategy, rewording its
     description or adding another strategy file leaves it alone.
     """
-    rules = {"strategy": {k: v for k, v in strategy.items() if k not in ("name", "description", "order")},
+    # Parts a strategy does not use are left out, so a new optional part never changes the others' codes.
+    rules = {"strategy": {k: v for k, v in strategy.items() if k not in ("name", "description", "order") and v not in (None, False, 0, 0.0)},
              "settings": {k: cfg[k] for k in RULE_SETTINGS}, "engine": ENGINE_RULES}
     return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()[:12]
 
@@ -138,6 +188,17 @@ def seen(row: Mapping[str, Any], snap: Mapping[str, Any], now: float, cfg: Mappi
         safety_age_s=now - row["safety_ts"] if row.get("safety_ts") else None,
     )
     return json.dumps(values)
+
+
+def facts(ctx: Ctx, row: Mapping[str, Any], snap: Mapping[str, Any], now: float) -> dict[str, Any]:
+    """Everything the rules may look at: the token, this price, its creator's record and its time since graduating."""
+    cfg, out = ctx.cfg["shadow"], dict(row)
+    out.update({k: snap[k] for k in SEEN_SNAP if k in snap})
+    out.update(ctx.store.deployer(row.get("creator"), row["mint"], row["migrated_at"], now, cfg["deployer_window_days"] * 86400))
+    first, peak = ctx.store.since_graduation(row["mint"], row["migrated_at"], cfg["graduation_price_within_s"], cfg["entry_limits"]["dex_ids"])
+    out["graduation_price"] = first
+    out["liquidity_peak"] = max((v for v in (peak, snap.get("liquidity_usd")) if v is not None), default=None)
+    return out
 
 
 def not_a_graduation(ctx: Ctx, row: Mapping[str, Any]) -> str | None:
@@ -227,6 +288,9 @@ def exit_rule(trade: Mapping[str, Any], strategy: Mapping[str, Any], price: floa
         return "trailing_stop", left
     if strategy["time_stop_s"] is not None and now - trade["entry_ts"] >= strategy["time_stop_s"]:
         return "time_stop", left
+    stuck = strategy["no_progress"]
+    if stuck and now - trade["entry_ts"] >= stuck["within_s"] and trade["peak_price"] < entry * stuck["multiple"]:
+        return "no_progress", left
     steps = strategy["take_profit"]
     if trade["steps_done"] < len(steps) and price >= entry * steps[trade["steps_done"]]["multiple"]:
         return "take_profit", min(steps[trade["steps_done"]]["sell_fraction"], left)
@@ -287,7 +351,7 @@ def _new_signals(ctx: Ctx, row: Mapping[str, Any], snap: Mapping[str, Any], now:
             ctx.shadow_counts["not_graduations"] += 1
             log.info("shadow bot: not trading %s (%s): %s", row.get("symbol"), row["mint"], problem)
         return 0
-    price, saw = snap["price_usd"], seen(row, snap, now, cfg, ctx.sol_price_usd)
+    price, known = snap["price_usd"], None
     for strategy in wanted:
         version = versions(ctx, now)[strategy["id"]]
         if migrated < version["started_at"]:
@@ -298,15 +362,18 @@ def _new_signals(ctx: Ctx, row: Mapping[str, Any], snap: Mapping[str, Any], now:
             if now > migrated + strategy["min_after_s"] + cfg["max_entry_wait_s"]:
                 continue
         else:
-            if strategy["max_after_s"] is not None and now - migrated > strategy["max_after_s"]:
+            age = now - migrated
+            if age < strategy["check_from_s"] or (strategy["max_after_s"] is not None and age > strategy["max_after_s"]):
                 continue
-            if not rules_hold(strategy, row, now, cfg):
+            known = known or facts(ctx, row, snap, now)
+            if not rules_hold(strategy, known, now, cfg):
                 continue
             signal_ts = now
+        known = known or facts(ctx, row, snap, now)
         ctx.store.add_paper_trade(
             strategy=strategy["id"], lane=strategy["lane"], mint=row["mint"], status="pending",
             signal_ts=signal_ts, signal_price=price, migrated_at=migrated, size_sol=strategy["size_sol"],
-            rules_version=version["version"], signal_json=saw,
+            rules_version=version["version"], signal_json=seen(known, snap, now, cfg, ctx.sol_price_usd),
         )
         ctx.shadow_counts["signals"] += 1
         made += 1
@@ -325,7 +392,7 @@ def _enter(ctx: Ctx, trade: dict[str, Any], strategy: Mapping[str, Any], row: Ma
     due = max(trade["signal_ts"], trade["migrated_at"] + strategy["min_after_s"])
     if now <= trade["signal_ts"] or now < due:
         return  # still waiting for the next price
-    saw = seen(row, snap, now, cfg, ctx.sol_price_usd)
+    saw = seen(facts(ctx, row, snap, now), snap, now, cfg, ctx.sol_price_usd)
     if now > due + cfg["max_entry_wait_s"]:
         return _fail(ctx, trade, now, "no price in time", saw)
     if snap.get("dex_id") not in limits["dex_ids"] or snap.get("quote_mint") != SOL_MINT:
@@ -335,7 +402,8 @@ def _enter(ctx: Ctx, trade: dict[str, Any], strategy: Mapping[str, Any], row: Ma
         return _fail(ctx, trade, now, "no pool to buy from", saw)
     if snap["liquidity_usd"] < limits["min_liquidity_usd"] or fill["impact_pct"] > limits["max_impact_pct"]:
         return _fail(ctx, trade, now, "slippage limit", saw)
-    if unlucky(f"entry|{trade['strategy']}|{trade['mint']}", cfg["entry_fail_pct"]):
+    # A strategy that borrows another's entry shares its dropped entries too, so both hold the same tokens.
+    if unlucky(f"entry|{strategy['entries_as'] or trade['strategy']}|{trade['mint']}", cfg["entry_fail_pct"]):
         return _fail(ctx, trade, now, "entry did not land", saw)
     changes = dict(
         entry_json=saw,
@@ -507,7 +575,31 @@ def affected(trade: Mapping[str, Any], gap_s: float, now: float) -> bool:
     return trade["status"] in ("open", "closed") and gap >= gap_s
 
 
-def gate(summary: Mapping[str, Any], days: float, cfg: Mapping[str, Any]) -> dict[str, Any]:
+def versus(own: Sequence[Mapping[str, Any]], own_start: float | None, bench: Sequence[Mapping[str, Any]] | None,
+           bench_start: float | None, name: str | None, is_benchmark: bool) -> dict[str, Any]:
+    """Mean return per trade against the benchmark strategy, over the time both have been running their current rules.
+
+    Every trade is the same size, so the mean return is the profit per trade. Total profit
+    would favour whichever strategy simply trades more often.
+    """
+    since = max(own_start, bench_start) if own_start and bench_start else None
+    mean = lambda trades: [t["return_pct"] for t in trades if t["status"] == "closed" and since is not None and t["signal_ts"] >= since]
+    mine, theirs = mean(own), mean(bench or [])
+    a, b = (statistics.fmean(v) if v else None for v in (mine, theirs))
+    return {"benchmark": name, "is_benchmark": is_benchmark, "since": since, "trades": len(mine), "mean_return_pct": a,
+            "benchmark_trades": len(theirs), "benchmark_mean_return_pct": b, "difference_pct": a - b if a is not None and b is not None else None}
+
+
+def halves(trades: Sequence[Mapping[str, Any]], start: float | None, now: float) -> dict[str, Any]:
+    """Profit of the trades closed in the first and in the second half of the time since `start`."""
+    split = (start + now) / 2 if start else None
+    closed = [t for t in trades if t["status"] == "closed"]
+    first = [t["pnl_sol"] for t in closed if split is not None and t["closed_at"] < split]
+    second = [t["pnl_sol"] for t in closed if split is not None and t["closed_at"] >= split]
+    return {"split_at": split, "first_trades": len(first), "first_sol": sum(first), "second_trades": len(second), "second_sol": sum(second)}
+
+
+def gate(summary: Mapping[str, Any], days: float, cfg: Mapping[str, Any], against: Mapping[str, Any], parts: Mapping[str, Any]) -> dict[str, Any]:
     """Go / no-go for real trading. Every check must pass; until then the answer is no."""
     ranked, n = summary["ranked"], summary["trades"]
     without = summary["profit_sol"] - sum(ranked[: cfg["drop_best"]])
@@ -520,7 +612,17 @@ def gate(summary: Mapping[str, Any], days: float, cfg: Mapping[str, Any]) -> dic
          "ok": median is not None and median >= cfg["median_min_pct"]},
         {"name": f"Still profitable without the best {cfg['drop_best']} trades", "have": f"{without:+.3f} SOL" if n else "none yet",
          "ok": n > cfg["drop_best"] and without > 0},
+        {"name": "Profitable in both halves of its test period",
+         "have": f"{parts['first_sol']:+.3f} / {parts['second_sol']:+.3f} SOL" if n else "none yet",
+         "ok": parts["first_trades"] > 0 and parts["second_trades"] > 0 and parts["first_sol"] > 0 and parts["second_sol"] > 0},
     ]
+    if against["is_benchmark"]:
+        checks.append({"name": "This is the benchmark the others must beat", "have": "", "ok": True})
+    else:
+        diff, both = against["difference_pct"], against["trades"] and against["benchmark_trades"]
+        checks.append({"name": f"Beats {against['benchmark'] or 'the benchmark'} on mean return per trade, same period",
+                       "have": f"{against['mean_return_pct']:+.1f}% against {against['benchmark_mean_return_pct']:+.1f}%" if both else "none yet",
+                       "ok": bool(both) and diff > 0})
     enough = checks[0]["ok"] and checks[1]["ok"]
     passed = all(c["ok"] for c in checks)
     status = "GO" if passed else ("NO-GO" if enough else "NOT ENOUGH DATA")
@@ -540,7 +642,7 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
     known: dict[str, list[tuple[int, str | None, float]]] = {}
     for sid, number, mark, began in db.execute("SELECT strategy, version, fingerprint, started_at FROM strategy_versions ORDER BY strategy, version"):
         known.setdefault(sid, []).append((number, mark, began))
-    out = []
+    current = {}
     for spec in specs:
         cur = db.execute("SELECT * FROM paper_trades WHERE strategy = ?", (spec["id"],))
         columns = [c[0] for c in cur.description]   # works whatever row type the connection returns
@@ -554,11 +656,21 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
             version, start = history[-1][0], history[-1][2]
         else:
             version, start = (history[-1][0] + 1 if history else max([t["rules_version"] for t in every], default=0) + 1), None
-        days = (now - start) / 86400 if start else 0.0
         trades = [t for t in every if t["rules_version"] == version]
-        summary = summarise([t for t in trades if not t["affected"]])
+        current[spec["id"]] = {"every": every, "version": version, "start": start, "trades": trades,
+                               "watched": [t for t in trades if not t["affected"]]}
+    bench_id = shadow["gate"]["benchmark"]
+    bench, bench_name = current.get(bench_id), next((s["name"] for s in specs if s["id"] == bench_id), None)
+    out = []
+    for spec in specs:
+        mine = current[spec["id"]]
+        every, version, start, trades, watched = (mine[k] for k in ("every", "version", "start", "trades", "watched"))
+        days = (now - start) / 86400 if start else 0.0
+        summary = summarise(watched)
         hit = summarise([t for t in trades if t["affected"]])
         everything = summarise(trades)
+        against = versus(watched, start, bench["watched"] if bench else None, bench["start"] if bench else None, bench_name, spec["id"] == bench_id)
+        parts = halves(watched, start, now)
         opened = [t for t in trades if t["status"] == "open"]
         failed = [t for t in trades if t["status"] == "failed"]
         # Open positions at their last price, before any selling cost: a rough guide only.
@@ -577,15 +689,18 @@ def report(db: Any, cfg: Mapping[str, Any], specs: Sequence[Mapping[str, Any]], 
         recent = sorted((t for t in every if t["status"] in ("closed", "open")), key=lambda t: t["closed_at"] or t["entry_ts"], reverse=True)[:15]
         out.append({
             "id": spec["id"], "name": spec["name"], "description": spec["description"], "lane": spec["lane"], "size_sol": spec["size_sol"],
+            "entries_as": spec["entries_as"],
             "version": version, "version_started_at": start, "days": days,
             **{k: v for k, v in summary.items() if k != "ranked"},
+            "profit_without_best_n_sol": summary["profit_sol"] - sum(summary["ranked"][: shadow["gate"]["drop_best"]]) if summary["trades"] else None,
+            "versus": against, "halves": parts,
             "open": len(opened), "open_marked_sol": marked, "open_affected": sum(1 for t in opened if t["affected"]),
             "affected": {k: hit[k] for k in ("trades", "wins", "hit_rate_pct", "median_return_pct", "mean_return_pct", "profit_sol", "exits")},
             "all": {k: everything[k] for k in ("trades", "profit_sol")},
             "earlier": earlier,
             "pending": sum(1 for t in trades if t["status"] == "pending"),
             "failed": {reason: sum(1 for t in failed if t["exit_reason"] == reason) for reason in sorted({t["exit_reason"] for t in failed})},
-            "gate": gate(summary, days, shadow["gate"]),
+            "gate": gate(summary, days, shadow["gate"], against, parts),
             "recent": [{k: t[k] for k in ("mint", "status", "entry_ts", "entry_price", "closed_at", "exit_reason", "pnl_sol", "return_pct",
                                           "last_price", "affected", "max_gap_s", "rules_version")} for t in recent],
         })

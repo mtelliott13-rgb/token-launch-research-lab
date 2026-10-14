@@ -154,3 +154,27 @@ def test_existing_tokens_that_already_qualified_are_queued_once():
     assert sorted(r["mint"] for r in ctx.store.description_candidates(100.0, 10)) == ["GRAD", "PEAKED", "ROSE"]
     assert {m: ctx.store.row(m)["desc_state"] for m in ("ROSE", "GRAD", "PEAKED", "DEAD", "HASDESC")} == {
         "ROSE": "wanted", "GRAD": "wanted", "PEAKED": "wanted", "DEAD": None, "HASDESC": None}
+
+
+def test_social_links_are_kept_only_when_they_are_the_right_kind_of_link():
+    assert metadata.parse_links({"twitter": "https://x.com/cat", "telegram": "https://t.me/catcoin", "website": "https://cat.fun"}) == {
+        "twitter": "https://x.com/cat", "telegram": "https://t.me/catcoin", "website": "https://cat.fun"}
+    # Empty, wrong host for the kind, not a web link at all: dropped. A website may be anywhere.
+    assert metadata.parse_links({"twitter": "https://www.instagram.com/cat", "telegram": "", "website": "javascript:alert(1)"}) == {}
+    assert metadata.parse_links({"twitter": "https://www.twitter.com/cat", "telegram": "https://telegram.me/c", "website": "https://www.instagram.com/c"}) == {
+        "twitter": "https://www.twitter.com/cat", "telegram": "https://telegram.me/c", "website": "https://www.instagram.com/c"}
+    assert metadata.parse_links(["not", "a", "dict"]) == {}
+
+
+def test_fetch_saves_the_social_links_without_overwriting_dexscreeners():
+    payload = {"description": "cats", "twitter": "https://x.com/meta", "telegram": "https://t.me/meta", "website": "https://meta.fun"}
+    handler, calls = serve({FILEBASE: httpx.Response(200, json=payload)})
+
+    async def flow(ctx):
+        row = seeded(ctx, FRANK, f"https://ipfs.io/ipfs/{CID}", desc_state="wanted")
+        ctx.store.upsert_token(FRANK, source=row["source"], first_seen_at=row["first_seen_at"], twitter="https://x.com/from_dexscreener")
+        return await metadata.fetch_one(ctx, ctx.store.row(FRANK), time.time())
+
+    result, ctx, _ = run(handler, flow)
+    row = ctx.store.row(FRANK)
+    assert result == "done" and (row["twitter"], row["telegram"], row["website"]) == ("https://x.com/from_dexscreener", "https://t.me/meta", "https://meta.fun")

@@ -104,3 +104,18 @@ def test_the_dashboard_filter_followups_and_retention_use_the_same_rule():
     assert verdicts == {"TIMED": "kept", "UNTIMED": "kept", "CURVE": "pruned", "ELSEWHERE": "pruned", "STABLE": "pruned"}
     # Not graduated does not mean thrown away: reaching the market cap threshold still keeps everything.
     assert retention.verdict_for(rows["STABLE"], keep["keep_min_peak_mcap_usd"], keep) == "kept"
+
+
+def test_a_graduation_reads_the_metadata_file_again_for_its_social_links():
+    async def flow(ctx):
+        ctx.safety.request = lambda mint, priority=0: None
+        feed(ctx, CREATE)
+        ctx.store.update_state(FIX, desc_state="done")              # read before links were kept
+        feed(ctx, MIGRATE)
+        first = ctx.store.row(FIX)["desc_state"]
+        ctx.store.update_state(FIX, desc_state="done")
+        feed(ctx, MIGRATE)                                         # a second pool is not a graduation: no second read
+        return first, ctx.store.row(FIX)["desc_state"]
+
+    (first, second), _, _ = run(lambda request: None, flow)
+    assert (first, second) == ("wanted", "done")
