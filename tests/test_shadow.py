@@ -606,8 +606,9 @@ def test_social_rules_need_the_links_themselves():
     links = {"telegram": "https://t.me/x", "twitter": "https://x.com/x"}
     assert shadow.rules_hold(social, {**SAFE, **links}, T0, SHADOW)
     assert shadow.rules_hold(social, {**SAFE, "telegram": "https://t.me/x", "website": "https://x.fun"}, T0, SHADOW)
-    assert not shadow.rules_hold(social, {**SAFE, "twitter": "https://x.com/x", "website": "https://x.fun"}, T0, SHADOW)   # no Telegram
+    assert shadow.rules_hold(social, {**SAFE, "twitter": "https://x.com/x", "website": "https://x.fun"}, T0, SHADOW)       # no Telegram needed
     assert not shadow.rules_hold(social, {**SAFE, "telegram": "https://t.me/x"}, T0, SHADOW)
+    assert not shadow.rules_hold(social, {**SAFE, "twitter": "https://x.com/x", "website": ""}, T0, SHADOW)
     assert not shadow.rules_hold(social, {**links, "top10_pct": 31.0, "chain_mint_authority": 0, "chain_freeze_authority": 0, "bot_volume": 0}, T0, SHADOW)
 
 

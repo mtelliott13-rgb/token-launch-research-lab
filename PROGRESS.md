@@ -301,7 +301,8 @@ The user's restart at 21:11 came after every engine file was saved, so all ten s
 started then: version 2 of the first three, version 1 of the new ones. All the new ones use
 the slippage limit, real graduations only, the Safety only rules and 0.5 SOL.
 
-- `social_safety` (4): a Telegram link and an X link or a website. `clean_deployer` (5): the
+- `social_safety` (4): at least two of Telegram, X link, website (rule `min_social_links: 2`;
+  was "Telegram and (X or website)" until the evening of 2026-10-13, which had made no trades). `clean_deployer` (5): the
   creator launched 3 or fewer tokens in the last 7 days (this one included) or has an earlier
   graduation, and never 10+ launches with no graduation. `after_boost` (6): from 10 to 30
   minutes after graduation, price at least the first PumpSwap price (within 3 minutes of
@@ -382,9 +383,11 @@ All free, no keys.
 
 ## Open decisions
 
-1. **Telegram rule in strategies 4 and 8.** Almost no graduate lists a Telegram link (0 of 20
-   metadata files checked, 27 of 2,738 on DexScreener), so these two may never reach 200 trades.
-   Option: "an X link or a website" alone. Left as specified until there is live data.
+1. **Social rule, decided 2026-10-13.** Of 2,925 pump.fun graduates since Oct 8, the links we
+   had stored (DexScreener only) gave 13.4% with two or more of Telegram, X and website, and
+   16.9% with X or a website. A sample of 200, adding each token's metadata file (176
+   readable): 59.7% two or more, 68.8% X or website, 4.5% Telegram. Two of three is above the
+   10% bar, so strategies 4 and 8 use it; in practice it mostly means X and a website.
 
 2. **PumpPortal trade data (blocks Phase 2b, Lane A).** PumpPortal refuses per-token trade
    subscriptions without an API key funded with about 0.02 SOL, so there is no free

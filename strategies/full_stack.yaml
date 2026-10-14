@@ -15,8 +15,7 @@ entry:
     freeze_revoked_onchain: true
     max_top10_pct: 30
     no_bot_volume: true
-    has_telegram: true
-    has_x_or_website: true
+    min_social_links: 2             # at least two of: Telegram, X, website
     clean_deployer:
       max_recent_launches: 3
       or_earlier_graduations: 1

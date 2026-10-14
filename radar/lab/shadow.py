@@ -137,6 +137,8 @@ def _clean_deployer(row: Mapping[str, Any], want: Mapping[str, float], now: floa
 RULES = {
     "has_telegram": lambda row, want, now, cfg: bool(row.get("telegram")) == bool(want),
     "has_x_or_website": lambda row, want, now, cfg: bool(row.get("twitter") or row.get("website")) == bool(want),
+    # At least this many of Telegram, X and website are listed.
+    "min_social_links": lambda row, want, now, cfg: sum(bool(row.get(k)) for k in ("telegram", "twitter", "website")) >= want,
     "clean_deployer": _clean_deployer,
     # 5-minute buys are at least this many times the 5-minute sells (and there are buys at all).
     "min_buys_per_sell_m5": lambda row, want, now, cfg: (

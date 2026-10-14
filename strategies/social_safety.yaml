@@ -1,10 +1,11 @@
-# 4. Safety only, plus the creator listed a Telegram group and an X account or a website.
+# 4. Safety only, plus at least two of a Telegram group, an X account and a website.
+# (Was "Telegram and (X or website)" until 2026-10-13: almost no graduate lists Telegram.)
 # The links come from DexScreener and from the token's own metadata file. Anyone can paste any
 # link there; this only checks that one is listed.
 name: Social + safety
 lane: B
 order: 4
-description: The safety rules, plus a Telegram link and an X link or a website.
+description: The safety rules, plus at least two of a Telegram link, an X link and a website.
 size_sol: 0.5
 
 entry:
@@ -16,8 +17,7 @@ entry:
     freeze_revoked_onchain: true
     max_top10_pct: 30
     no_bot_volume: true
-    has_telegram: true
-    has_x_or_website: true
+    min_social_links: 2             # at least two of: Telegram, X, website
 
 # Default exits, the same as the baselines.
 exits:
