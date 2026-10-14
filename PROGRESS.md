@@ -17,9 +17,9 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`), Shadow Bot (`/shadow`).
 
-**A restart is pending** for the "affected by outage" split, shadow bot rules version 2,
-per-strategy versions and the app-wide graduation rule (all built 2026-10-13). Everything else below, including the shadow bot, has been live since the restart
-on 2026-10-13 at 15:32.
+**A restart is pending** for the social rule of social_safety and full_stack (2026-10-13) and
+the daily database backup (2026-10-14). Everything else below has been live since the restart
+on 2026-10-13 at 21:11.
 
 ## What exists
 
@@ -365,6 +365,26 @@ curve that then moved to PumpSwap: either we got its first "migrate" message (th
   the shadow bot, which needs the moment.
 - Retention: a token with a pool but no graduation is no longer kept in full for that reason
   alone; it needs the $30K peak (or $10K or Rising for its first 4 hours), like any other.
+
+## Daily database backup (2026-10-14, needs the restart)
+
+`radar/backup.py`, settings under `backup:`. Once a day the app copies the database with
+SQLite's own backup command (a consistent moment, while the collectors keep writing), checks
+the copy, and gzips it into `~/meme-radar-backups/` (the user asked for this folder outside the
+project). Kept: the newest 3 in `daily/`, and the first backup of each week in `weekly/`, newest
+4 (a hard link while it is also a daily, so no extra space). Old files are removed only after a
+new backup succeeded. It is skipped, with an error on the Data page, if the disk would be left
+with under 2 GB free. A Mac that slept makes its backup on waking (it is due 24 hours after the
+newest one).
+
+- First backup, made by hand on 2026-10-14 at 13:27: database 1,244 MB -> 557 MB in 75 seconds,
+  restored to a scratch copy and checked (169,378 tokens, 1,716 paper trades).
+- Disk: at most 6 distinct files (3 daily + 4 weekly, one shared), about 3.3 GB at today's size,
+  growing with the database, plus a temporary uncompressed copy (about 1.2 GB) for a minute
+  during each backup. The Mac had 13 GB free on 2026-10-14.
+- `uv run python -m radar.backup list` shows them, `... now` makes one, and
+  `... restore FILE` puts one back (refuses while the app is running; the replaced database is
+  moved to `data/archive/radar-before-restore-<time>/`).
 
 ## Outside requests, per day
 

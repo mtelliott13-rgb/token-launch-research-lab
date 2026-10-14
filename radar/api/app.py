@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from radar import rising
+from radar import backup, rising
 from radar.collectors import dexscreener, followup, geckoterminal, metadata, pumpportal, solana_rpc
 from radar.collectors.common import publish_tokens, supervise
 from radar.collectors.rugcheck import SafetyService, no_report_note
@@ -51,6 +51,7 @@ def build_ctx(cfg: dict[str, Any], http: httpx.AsyncClient) -> Ctx:
     health.register("retention", label="Retention (disk)")
     health.register("metadata", label="Token metadata (descriptions)")
     health.register("solana_rpc", label="Solana RPC (on-chain authority)")
+    health.register("backup", label="Database backup (daily)")
     ctx = Ctx(
         cfg=cfg,
         store=Store(
@@ -114,6 +115,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             "metadata": metadata.run,
             "solana_rpc": solana_rpc.run,
             "rising": rising.run,
+            "backup": backup.run,
         }
         tasks = [asyncio.create_task(supervise(name, ctx, fn), name=name) for name, fn in collectors.items()]
         log.info("collectors started: %s", ", ".join(collectors))

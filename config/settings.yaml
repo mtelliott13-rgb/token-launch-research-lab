@@ -11,6 +11,19 @@ logging:
   dir: data/logs
   level: INFO
 
+# Daily database backup (SQLite's own backup command, then gzip), checked every check_every_s.
+# A backup is made when the newest one is every_hours old, so a Mac that slept catches up on wake.
+# The first backup of each week is also kept as a weekly copy. See radar/backup.py to list or restore.
+backup:
+  enabled: true
+  folder: ~/meme-radar-backups
+  every_hours: 24
+  keep_daily: 3
+  keep_weekly: 4
+  check_every_s: 600
+  first_check_after_s: 600
+  min_free_gb: 2               # skip (and show an error) rather than fill the disk
+
 sources:
   pumpportal:
     url: wss://pumpportal.fun/api/data
