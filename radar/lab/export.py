@@ -37,6 +37,9 @@ TRADE_COLUMNS = (
     "bot_volume_flag", "buys_m5", "sells_m5", "buys_h1", "sells_h1", "vol_m5_usd", "vol_h1_usd", "price_chg_m5_pct", "price_chg_h1_pct", "paid_boost",
     "on_rising_at_signal", "on_rising_at_entry", "momentum_score_at_entry", "on_rising_by_entry", "first_on_rising_at_utc", "rising_score_at_first_appearance", "rising_pattern",
     "theme", "launchpad", "mayhem_mode",
+    "has_telegram", "has_x", "has_website", "telegram_link", "x_link", "website_link",
+    "creator", "creator_launches", "creator_launches_last_7d", "creator_earlier_graduations", "creator_first_launch_at_utc", "creator_last_launch_at_utc",
+    "graduation_price_usd", "price_vs_graduation", "liquidity_peak_since_graduation_usd",
 )
 OPEN_COLUMNS = (
     "trade_id", "strategy", "mint", "symbol", "name", "entry_at_utc", "entry_price_usd", "size_sol", "cost_sol",
@@ -64,6 +67,14 @@ rules_version        which version of that strategy's rules made the trade. Vers
 entry_values_source  "saved" = the "at entry" columns are exactly what the engine saw when it entered (or when
                      the entry failed). "rebuilt" = version 1 trades, pieced together afterwards as described below.
 on_rising_at_entry, on_rising_at_signal, momentum_score_at_entry   saved trades only.
+has_telegram ... website_link   the token's social links when it entered (saved trades only). From DexScreener and the
+                     creator's own metadata file; anyone can paste any link, so these only say a link was listed.
+creator_*            the creator wallet's record in our own data when it entered (saved trades only): launches = PumpPortal
+                     create events we stored (since 2026-10-08, none while the app was off or the computer asleep),
+                     last_7d includes this token, earlier_graduations = its other tokens that graduated before this one.
+graduation_price_usd the first PumpSwap price within 3 minutes of graduating; price_vs_graduation = entry price / that.
+liquidity_peak_since_graduation_usd   the pool's highest liquidity between graduation and entry.
+exit_reason          also "no_progress" (E2: did not reach 1.2x within 10 minutes).
 
 Where the rebuilt "at entry" columns come from (for failed and pending trades: at the signal instead):
   entry_liquidity_usd, entry_fee_pct, entry_price_impact_pct, sol_usd_at_entry   saved with the buy itself
@@ -166,6 +177,17 @@ def trade_row(db: sqlite3.Connection, t: Mapping[str, Any], cfg: Mapping[str, An
             price_chg_h1_pct=saw.get("price_chg_h1"), paid_boost=_yes(None if saw.get("boosts_active") is None else saw["boosts_active"] > 0),
             on_rising_at_entry=_yes(saw.get("on_rising")), momentum_score_at_entry=saw.get("score"),
         )
+        if "creator_launches" in saw:   # saved from 2026-10-13 (second batch of strategies) on
+            row.update(
+                has_telegram=_yes(bool(saw.get("telegram"))), has_x=_yes(bool(saw.get("twitter"))), has_website=_yes(bool(saw.get("website"))),
+                telegram_link=saw.get("telegram"), x_link=saw.get("twitter"), website_link=saw.get("website"),
+                creator=saw.get("creator"), creator_launches=saw.get("creator_launches"),
+                creator_launches_last_7d=saw.get("creator_launches_recent"), creator_earlier_graduations=saw.get("creator_earlier_graduations"),
+                creator_first_launch_at_utc=_iso(saw.get("creator_first_seen_at")), creator_last_launch_at_utc=_iso(saw.get("creator_last_seen_at")),
+                graduation_price_usd=saw.get("graduation_price"),
+                price_vs_graduation=round(saw["price_usd"] / saw["graduation_price"], 4) if saw.get("graduation_price") and saw.get("price_usd") else None,
+                liquidity_peak_since_graduation_usd=saw.get("liquidity_peak"),
+            )
     if t.get("signal_json"):
         row["on_rising_at_signal"] = _yes(json.loads(t["signal_json"]).get("on_rising"))
     return row

@@ -27,20 +27,21 @@
   .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
   .muted { color: var(--muted); }
 
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
   #conn, .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink2); white-space: nowrap; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .mark { font-size: 10px; }
   .mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.crit { color: var(--crit); } .mark.idle { color: var(--muted); }
   #stats { margin-left: auto; color: var(--ink2); }
-  .nav { display: flex; gap: 4px; }
+  .nav { display: flex; flex-wrap: wrap; gap: 4px; }
   .nav a { padding: 2px 10px; border-radius: 999px; color: var(--ink2); text-decoration: none; }
   .nav a:hover { color: var(--ink); }
   .nav a[aria-current=page] { background: var(--raised); color: var(--ink); }
 
 
-  main { display: grid; gap: 12px; padding: 12px 16px; max-width: 1100px; margin: 0 auto; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px 16px; max-width: 1100px; margin: 0 auto; }
+  main > * { min-width: 0; }   /* a wide table scrolls inside its box instead of widening the page */
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   section > .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   section h2 { font-size: 14px; margin: 0; }
@@ -73,16 +74,18 @@
   @media (prefers-color-scheme: light) { :root { --s1: #1f6fd1; --s2: #a86b00; --s3: #8a4fd0; } }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink2); }
-  #chart { position: relative; }
-  #chart svg { display: block; width: 100%; height: 260px; }
-  #chart .grid { stroke: var(--line); stroke-width: 1; }
-  #chart .zero { stroke: var(--muted); stroke-width: 1; }
-  #chart .axis { fill: var(--muted); font-size: 11px; }
-  #chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; }
-  #chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
-  #tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: nowrap; }
-  #tip .t { color: var(--muted); margin-bottom: 2px; }
-  #tip .r { display: flex; justify-content: space-between; gap: 14px; }
+  #charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px 16px; margin-top: 10px; }
+  .panel h3 { font-size: 12px; font-weight: 500; margin: 0 0 2px; color: var(--ink); }
+  .panel .plot { position: relative; }
+  .panel svg { display: block; width: 100%; height: 150px; }
+  .panel .grid { stroke: var(--line); stroke-width: 1; }
+  .panel .zero { stroke: var(--muted); stroke-width: 1; }
+  .panel .axis { fill: var(--muted); font-size: 10px; }
+  .panel .series { fill: none; stroke-width: 2; stroke-linejoin: round; }
+  .panel .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: nowrap; z-index: 2; }
+  .tip .t { color: var(--muted); margin-bottom: 2px; }
+  .tip .r { display: flex; justify-content: space-between; gap: 14px; }
   .empty { color: var(--muted); padding: 28px 12px; text-align: center; }
   .pos { color: var(--up); } .neg { color: var(--down); }
   .gate { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
@@ -128,6 +131,25 @@
   </section>
 
   <section>
+    <div class="head"><h2>Side by side against the benchmark</h2><span class="sub" id="vs-sub"></span></div>
+    <div class="wrap"><table>
+      <thead><tr>
+        <th>Strategy</th>
+        <th class="num" title="Closed trades watched throughout, under the current rules">Closed trades</th>
+        <th class="num" title="Mean return per trade since both this strategy and the benchmark began their current rules">Mean return</th>
+        <th class="num" id="vs-bench-head" title="The benchmark's mean return per trade over the same period">Benchmark</th>
+        <th class="num" title="This strategy's mean return minus the benchmark's. Must be above zero to pass the gate.">Difference</th>
+        <th class="num" title="Profit of trades closed in the first half of this strategy's test period">First half</th>
+        <th class="num" title="Profit of trades closed in the second half. Both halves must be profitable to pass the gate.">Second half</th>
+        <th class="num" id="vs-drop-head" title="Profit with the best trades taken out">Without best 2</th>
+        <th>Gate</th>
+      </tr></thead>
+      <tbody id="vs"></tbody>
+    </table></div>
+    <div class="body"><div class="note" id="vs-note"></div></div>
+  </section>
+
+  <section>
     <div class="head"><h2>Affected by outage</h2><span class="sub" id="aff-sub"></span></div>
     <div class="wrap"><table>
       <thead><tr>
@@ -156,10 +178,10 @@
   </section>
 
   <section>
-    <div class="head"><h2>Equity curve</h2><span class="sub">running profit of closed trades that were watched throughout, in SOL, after all costs</span></div>
+    <div class="head"><h2>Equity curves</h2><span class="sub">running profit of closed trades that were watched throughout, in SOL, after all costs; one chart per strategy, all on the same scale</span></div>
     <div class="body">
       <div class="legend" id="legend"></div>
-      <div id="chart"></div>
+      <div id="charts"></div>
     </div>
   </section>
 
@@ -172,7 +194,7 @@
   <section>
     <div class="head"><h2>How trades ended</h2><span class="sub">closed trades by the rule that sold them, and entries that never happened</span></div>
     <div class="wrap"><table>
-      <thead><tr><th>Strategy</th><th class="num" title="Sold by the hard stop">Hard stop</th><th class="num" title="Sold by the trailing stop">Trailing</th><th class="num" title="Sold at the 24-hour time limit">Time stop</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">No price</th><th class="num" title="Entry skipped: the pool was too small, or the trade would have moved the price too far">Slippage</th><th class="num" title="Entry skipped: the price did not come from the launchpad's own pool, quoted in SOL">Wrong pool</th><th class="num" title="Simulated dropped transaction">Dropped</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">Too late</th><th class="num">Waiting</th><th class="num">Fees</th></tr></thead>
+      <thead><tr><th>Strategy</th><th class="num" title="Sold by the hard stop">Hard stop</th><th class="num" title="Sold by the trailing stop">Trailing</th><th class="num" title="Sold at the 24-hour time limit">Time stop</th><th class="num" title="Sold because the price had not reached the required multiple in time (E2)">No progress</th><th class="num" title="Closed trades that sold part of the position at a take-profit step before the rest was sold">Took profit</th><th class="num" title="DexScreener stopped giving a price; what was left was written off at zero">No price</th><th class="num" title="Entry skipped: the pool was too small, or the trade would have moved the price too far">Slippage</th><th class="num" title="Entry skipped: the price did not come from the launchpad's own pool, quoted in SOL">Wrong pool</th><th class="num" title="Simulated dropped transaction">Dropped</th><th class="num" title="No price arrived soon enough after the signal, for example during an outage">Too late</th><th class="num">Waiting</th><th class="num">Fees</th></tr></thead>
       <tbody id="ends"></tbody>
     </table></div>
   </section>
@@ -215,70 +237,78 @@ function s(tag, attrs, ...kids) {
 }
 const DASH = "–";
 const MARKS = { ok: "✓", crit: "✕", idle: "●" };
-const COLORS = ["var(--s1)", "var(--s2)", "var(--s3)"];
+// Two series per chart at most: the strategy, and the benchmark it must beat.
+const OWN = "var(--s1)", BENCH = "var(--s2)";
 const fmtInt = (v) => v == null ? DASH : Math.round(v).toLocaleString("en-US");
 const fmtPct = (v, d = 1) => v == null ? DASH : (v > 0 ? "+" : "") + v.toFixed(d) + "%";
 const fmtSol = (v, d = 3) => v == null ? DASH : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d) + " SOL";
 const fmtWhen = (ts) => ts == null ? DASH : new Date(ts * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const sign = (v) => v == null || v === 0 ? "" : v > 0 ? " pos" : " neg";
 const num = (text, cls, title) => h("td", { class: "num" + (cls || ""), title }, text);
-const swatch = (i) => h("span", { class: "sw", style: `background:${COLORS[i % COLORS.length]}` });
+const swatch = (color) => h("span", { class: "sw", style: `background:${color}` });
 const GATE = { "GO": ["ok", "✓"], "NO-GO": ["crit", "✕"], "NOT ENOUGH DATA": ["idle", "●"] };
-const REASONS = { hard_stop: "hard stop", trailing_stop: "trailing stop", time_stop: "time stop", take_profit: "take profit", no_price: "price vanished" };
+const REASONS = { hard_stop: "hard stop", trailing_stop: "trailing stop", time_stop: "time stop", take_profit: "take profit", no_price: "price vanished", no_progress: "no progress" };
 
-function gateChip(g) {
+function gateChip(g, short) {
   const [cls, mark] = GATE[g.status];
-  return h("span", { class: "gate" }, h("span", { class: "mark " + cls }, mark), g.status === "NOT ENOUGH DATA" ? "Not enough data" : g.status === "GO" ? "Passes" : "No-go");
+  return h("span", { class: "gate", title: short ? `${g.checks.filter((c) => c.ok).length} of ${g.checks.length} checks pass` : null }, h("span", { class: "mark " + cls }, mark),
+    g.status === "NOT ENOUGH DATA" ? (short ? "Too early" : "Not enough data") : g.status === "GO" ? "Passes" : "No-go");
 }
 
-function drawChart(d) {
-  const box = $("chart"), list = d.strategies;
+function drawCharts(d) {
+  const box = $("charts"), list = d.strategies;
   if (!list.some((x) => x.curve.length)) {
-    box.replaceChildren(h("div", { class: "empty" }, "No closed trades yet. A trade closes when a stop, the time limit or the last take-profit sells it, so the first points appear within a day of the first graduation after the restart."));
+    box.replaceChildren(h("div", { class: "empty", style: "grid-column:1/-1" }, "No closed trades yet. A trade closes when a stop, the time limit or the last take-profit sells it, so the first points appear within a day of the first graduation after the restart."));
     return;
   }
-  const W = Math.max(320, box.clientWidth), H = 260, L = 58, R = 12, T = 10, B = 24;
+  const bench = list.find((x) => x.versus && x.versus.is_benchmark);
   const t0 = d.started_at, t1 = Math.max(d.now, t0 + 60);
-  const series = list.map((x) => [[t0, 0], ...x.curve, [t1, x.curve.length ? x.curve[x.curve.length - 1][1] : 0]]);
+  const line = (x) => [[x.version_started_at || t0, 0], ...x.curve, [t1, x.curve.length ? x.curve[x.curve.length - 1][1] : 0]];
+  // One scale for every chart, so a flat line means the same in each.
   let lo = 0, hi = 0;
-  for (const pts of series) for (const [, v] of pts) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-  // Round the scale outwards to tidy steps.
-  const raw = (hi - lo || 1) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const x of list) for (const [, v] of x.curve) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  const raw = (hi - lo || 1) / 3, mag = Math.pow(10, Math.floor(Math.log10(raw)));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= raw);
   lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
   if (hi === lo) hi = lo + step;
   const digits = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3;
+  const W = Math.max(280, (box.clientWidth >= 616 ? (box.clientWidth - 16) / 2 : box.clientWidth) | 0), H = 150, L = 44, R = 8, T = 8, B = 20;
   const X = (t) => L + (W - L - R) * (t - t0) / (t1 - t0), Y = (v) => T + (H - T - B) * (hi - v) / (hi - lo);
-  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Running profit per strategy. The same numbers are in the table above." });
-  for (let i = 0; i <= Math.round((hi - lo) / step); i++) {
-    const v = lo + step * i;
-    svg.append(s("line", { class: "grid", x1: L, x2: W - R, y1: Y(v), y2: Y(v) }), s("text", { class: "axis", x: L - 6, y: Y(v) + 4, "text-anchor": "end" }, v.toFixed(digits)));
-  }
-  svg.append(s("line", { class: "zero", x1: L, x2: W - R, y1: Y(0), y2: Y(0) }));
-  for (const [t, anchor] of [[t0, "start"], [t1, "end"]]) svg.append(s("text", { class: "axis", x: X(t), y: H - 6, "text-anchor": anchor }, fmtWhen(t)));
-  series.forEach((pts, i) => {
-    // The profit only changes when a trade closes, so the line moves in steps.
-    let path = `M${X(pts[0][0]).toFixed(1)} ${Y(pts[0][1]).toFixed(1)}`;
-    for (let k = 1; k < pts.length; k++) path += `H${X(pts[k][0]).toFixed(1)}V${Y(pts[k][1]).toFixed(1)}`;
-    svg.append(s("path", { class: "series", d: path, stroke: COLORS[i % COLORS.length] }));
-  });
-  const cross = s("line", { class: "cross", y1: T, y2: H - B, visibility: "hidden" });
-  svg.append(cross);
-  const tip = h("div", { id: "tip", hidden: true });
-  box.replaceChildren(svg, tip);
   const at = (pts, t) => { let v = 0; for (const [pt, pv] of pts) { if (pt > t) break; v = pv; } return v; };
-  svg.addEventListener("pointermove", (ev) => {
-    const r = svg.getBoundingClientRect(), x = Math.min(W - R, Math.max(L, (ev.clientX - r.left) * W / r.width));
-    const t = t0 + (t1 - t0) * (x - L) / (W - L - R);
-    cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("visibility", "visible");
-    tip.replaceChildren(h("div", { class: "t" }, fmtWhen(t)), ...list.map((x2, i) => h("div", { class: "r" }, h("span", null, swatch(i), x2.name), h("span", { class: "num" }, fmtSol(at(series[i], t))))));
-    tip.hidden = false;
-    const px = x * r.width / W;
-    tip.style.top = "8px";
-    tip.style.left = px > r.width / 2 ? "" : `${px + 12}px`;
-    tip.style.right = px > r.width / 2 ? `${r.width - px + 12}px` : "";
-  });
-  svg.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; });
+  box.replaceChildren(...list.map((x) => {
+    const series = [[x, OWN]];
+    if (bench && bench !== x) series.push([bench, BENCH]);
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Running profit of ${x.name}${series.length > 1 ? ` and of ${bench.name}` : ""}. The same totals are in the tables above.` });
+    for (let i = 0; i <= Math.round((hi - lo) / step); i++) {
+      const v = lo + step * i;
+      svg.append(s("line", { class: "grid", x1: L, x2: W - R, y1: Y(v), y2: Y(v) }), s("text", { class: "axis", x: L - 5, y: Y(v) + 3, "text-anchor": "end" }, v.toFixed(digits)));
+    }
+    svg.append(s("line", { class: "zero", x1: L, x2: W - R, y1: Y(0), y2: Y(0) }));
+    for (const [t, anchor] of [[t0, "start"], [t1, "end"]]) svg.append(s("text", { class: "axis", x: X(t), y: H - 5, "text-anchor": anchor }, fmtWhen(t)));
+    const lines = series.map(([y, color]) => [y, color, line(y)]);
+    // Benchmark first, so the strategy's own line is drawn on top. The profit moves in steps, when a trade closes.
+    for (const [, color, pts] of [...lines].reverse()) {
+      let path = `M${X(pts[0][0]).toFixed(1)} ${Y(pts[0][1]).toFixed(1)}`;
+      for (let k = 1; k < pts.length; k++) path += `H${X(pts[k][0]).toFixed(1)}V${Y(pts[k][1]).toFixed(1)}`;
+      svg.append(s("path", { class: "series", d: path, stroke: color }));
+    }
+    const cross = s("line", { class: "cross", y1: T, y2: H - B, visibility: "hidden" });
+    svg.append(cross);
+    const tip = h("div", { class: "tip", hidden: true }), plot = h("div", { class: "plot" }, svg, tip);
+    svg.addEventListener("pointermove", (ev) => {
+      const r = svg.getBoundingClientRect(), px = Math.min(W - R, Math.max(L, (ev.clientX - r.left) * W / r.width));
+      const t = t0 + (t1 - t0) * (px - L) / (W - L - R);
+      cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("visibility", "visible");
+      tip.replaceChildren(h("div", { class: "t" }, fmtWhen(t)), ...lines.map(([y, color, pts]) => h("div", { class: "r" }, h("span", null, swatch(color), y.name), h("span", { class: "num" }, fmtSol(at(pts, t))))));
+      tip.hidden = false;
+      const sx = px * r.width / W;
+      tip.style.top = "4px";
+      tip.style.left = sx > r.width / 2 ? "" : `${sx + 10}px`;
+      tip.style.right = sx > r.width / 2 ? `${r.width - sx + 10}px` : "";
+    });
+    svg.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; });
+    return h("div", { class: "panel" }, h("h3", null, x.name, h("span", { class: "muted" }, `  ${fmtInt(x.trades)} trades, ${x.trades ? fmtSol(x.profit_sol) : "no profit yet"}`)), plot);
+  }));
 }
 
 function render(d) {
@@ -303,7 +333,7 @@ function render(d) {
     : `${base} Each strategy's figures count only the trades made under its current rules, and only tokens that graduated after those rules began. Change a strategy file and that strategy starts a new version at the next restart; the others keep their clocks.`;
   $("cmp-sub").textContent = `${list.length} strategies from the strategies/ folder, ${list[0] ? list[0].size_sol : 0.5} SOL per trade`;
   $("cmp").replaceChildren(...list.map((x, i) => h("tr", null,
-    h("td", { class: "what" }, h("div", null, swatch(i), x.name), h("div", { class: "desc" }, x.description), h("div", { class: "desc" }, since(x))),
+    h("td", { class: "what" }, h("div", null, x.name), h("div", { class: "desc" }, x.description), h("div", { class: "desc" }, since(x))),
     num(fmtInt(x.trades)),
     num(x.hit_rate_pct == null ? DASH : x.hit_rate_pct.toFixed(1) + "%", "", `${x.wins} of ${x.trades}`),
     num(fmtPct(x.median_return_pct), sign(x.median_return_pct)),
@@ -315,7 +345,7 @@ function render(d) {
   const gapMin = Math.round(A.outage_gap_s / 60);
   $("aff-sub").textContent = `trades that went ${gapMin}+ minutes without a price while open: not in the table above, the equity curve or the gate`;
   $("aff").replaceChildren(...list.map((x, i) => { const a = x.affected; return h("tr", null,
-    h("td", { style: "white-space:nowrap" }, swatch(i), x.name),
+    h("td", { style: "white-space:nowrap" }, x.name),
     num(fmtInt(a.trades)),
     num(x.all.trades ? (100 * a.trades / x.all.trades).toFixed(0) + "%" : DASH, "", `${a.trades} of ${x.all.trades}`),
     num(a.hit_rate_pct == null ? DASH : a.hit_rate_pct.toFixed(1) + "%", "", `${a.wins} of ${a.trades}`),
@@ -327,33 +357,57 @@ function render(d) {
   $("aff-note").textContent = stale ? "Restart the collector to fill this table: the running one was started before trades were split this way, so for now every trade is counted above." : `While the computer sleeps or the app is off, no price is fetched and no stop can fire, so these results say more about the outage than about the strategy. Leaving them out is not neutral, though: a trade that runs for hours is more likely to meet an outage than one stopped out in minutes, so long-running trades (which include most big winners) are under-counted above. If the share in this table is large, treat every number on this page with suspicion.`;
   $("cmp-note").textContent = "Only trades that were watched throughout are counted here. Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: meme returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
   const old = list.flatMap((x, i) => x.earlier.map((e) => h("tr", null,
-    h("td", { style: "white-space:nowrap" }, swatch(i), x.name), num(e.version), num(fmtInt(e.trades)),
+    h("td", { style: "white-space:nowrap" }, x.name), num(e.version), num(fmtInt(e.trades)),
     num(e.hit_rate_pct == null ? DASH : e.hit_rate_pct.toFixed(1) + "%"),
     num(fmtPct(e.median_return_pct), sign(e.median_return_pct)), num(fmtPct(e.mean_return_pct), sign(e.mean_return_pct)),
     num(e.trades ? fmtSol(e.profit_sol) : DASH, sign(e.trades ? e.profit_sol : null)), num(fmtInt(e.open)))));
   $("old-section").hidden = !old.length;
   $("old").replaceChildren(...old);
-  $("legend").replaceChildren(...list.map((x, i) => h("span", null, swatch(i), x.name)));
-  drawChart(d);
+  const bench = list.find((x) => x.versus && x.versus.is_benchmark);
+  $("legend").replaceChildren(h("span", null, swatch(OWN), "the strategy named above each chart"), bench ? h("span", null, swatch(BENCH), `${bench.name}, the benchmark`) : null);
+  drawCharts(d);
 
-  $("gates").replaceChildren(...list.map((x, i) => h("div", { class: "tile" },
-    h("h3", null, swatch(i), x.name), gateChip(x.gate), h("div", { class: "muted", style: "margin-top:6px" }, since(x)),
+  // Side by side against the benchmark. A collector started before this table existed sends no comparison.
+  const drop = A.gate.drop_best || 2;
+  $("vs-drop-head").textContent = `Without best ${drop}`;
+  $("vs-bench-head").title = bench ? `${bench.name}'s mean return per trade over the same period` : "";
+  $("vs-sub").textContent = bench ? `to pass, a strategy must beat ${bench.name} on mean return per trade and be profitable in both halves of its test period` : "";
+  $("vs").replaceChildren(...list.map((x) => {
+    const v = x.versus, hv = x.halves;
+    if (!v) return h("tr", null, h("td", null, x.name), h("td", { class: "muted", colspan: 8 }, "restart the collector to fill this row"));
+    return h("tr", null,
+      h("td", { style: "white-space:nowrap" }, x.name, v.is_benchmark ? h("span", { class: "gate", style: "margin-left:8px" }, "benchmark") : null),
+      num(fmtInt(x.trades)),
+      num(fmtPct(v.mean_return_pct), sign(v.mean_return_pct), `${v.trades} trades since ${fmtWhen(v.since)}`),
+      num(v.is_benchmark ? DASH : fmtPct(v.benchmark_mean_return_pct), v.is_benchmark ? "" : sign(v.benchmark_mean_return_pct), v.is_benchmark ? null : `${v.benchmark_trades} trades over the same period`),
+      num(v.is_benchmark ? DASH : v.difference_pct == null ? DASH : (v.difference_pct > 0 ? "+" : "") + v.difference_pct.toFixed(1) + " pts", v.is_benchmark ? "" : sign(v.difference_pct)),
+      num(hv.first_trades ? fmtSol(hv.first_sol) : DASH, sign(hv.first_trades ? hv.first_sol : null), `${hv.first_trades} trades closed before ${fmtWhen(hv.split_at)}`),
+      num(hv.second_trades ? fmtSol(hv.second_sol) : DASH, sign(hv.second_trades ? hv.second_sol : null), `${hv.second_trades} trades closed from ${fmtWhen(hv.split_at)}`),
+      num(fmtSol(x.profit_without_best_n_sol), sign(x.profit_without_best_n_sol)),
+      h("td", { style: "white-space:nowrap" }, gateChip(x.gate, true)));
+  }));
+  $("vs-note").textContent = bench
+    ? `Mean return per trade is compared rather than total profit, because every trade is the same size and a strategy that simply trades more would win on total profit. The comparison only uses trades from the time both strategies have been running their current rules. The two exit experiments (E1, E2) buy exactly what ${bench.name} buys, at the same moments, so the difference in their row is the effect of the exits alone. The halves are the two halves of the time since the strategy's current rules began.`
+    : "";
+
+  $("gates").replaceChildren(...list.map((x) => h("div", { class: "tile" },
+    h("h3", null, x.name), gateChip(x.gate), h("div", { class: "muted", style: "margin-top:6px" }, since(x)),
     h("ul", null, x.gate.checks.map((c) => h("li", null, h("span", { class: "mark " + (c.ok ? "ok" : "crit") }, c.ok ? MARKS.ok : MARKS.crit), h("span", null, c.name), h("span", { class: "have" }, c.have)))))));
-  $("gate-note").textContent = `Each strategy is judged only on trades made under its current rules, and its days are counted from when those rules began. Trades affected by an outage are left out of every line. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
+  $("gate-note").textContent = `Each strategy is judged only on trades made under its current rules, and its days are counted from when those rules began. Trades affected by an outage are left out of every line. Besides its own results, a strategy must beat ${bench ? bench.name : "the benchmark"} on mean return per trade over the same period, and make a profit in each half of its test period, so a strategy carried by one lucky stretch does not pass. A strategy passes only when every line holds. Passing does not start anything: real trading is Phase 6 and needs your explicit go-ahead. One thing this gate cannot test yet: speed. Every entry and exit here happens at the next price we fetch, ${A.refresh.fast_s} to ${A.refresh.slow_s} seconds apart, and we cannot see what a faster or slower bot would have got.`;
 
   const count = (o, k) => fmtInt(o[k] || 0);
-  $("ends").replaceChildren(...list.map((x, i) => h("tr", null,
-    h("td", { style: "white-space:nowrap" }, swatch(i), x.name),
-    num(count(x.exits, "hard_stop")), num(count(x.exits, "trailing_stop")), num(count(x.exits, "time_stop")), num(fmtInt(x.took_profit)), num(count(x.exits, "no_price")),
+  $("ends").replaceChildren(...list.map((x) => h("tr", null,
+    h("td", { style: "white-space:nowrap" }, x.name),
+    num(count(x.exits, "hard_stop")), num(count(x.exits, "trailing_stop")), num(count(x.exits, "time_stop")), num(count(x.exits, "no_progress")), num(fmtInt(x.took_profit)), num(count(x.exits, "no_price")),
     num(count(x.failed, "slippage limit")), num(count(x.failed, "not the launchpad pool")),
     num(count(x.failed, "entry did not land")), num(fmtInt((x.failed["no price in time"] || 0) + (x.failed["no pool to buy from"] || 0))), num(fmtInt(x.pending)),
     num(x.trades ? x.fees_sol.toFixed(3) + " SOL" : DASH))));
 
-  const recent = list.flatMap((x, i) => x.recent.map((t) => ({ ...t, i, strategy: x.name, current: x.version }))).sort((a, b) => (b.closed_at || b.entry_ts) - (a.closed_at || a.entry_ts)).slice(0, 30);
+  const recent = list.flatMap((x) => x.recent.map((t) => ({ ...t, strategy: x.name, current: x.version }))).sort((a, b) => (b.closed_at || b.entry_ts) - (a.closed_at || a.entry_ts)).slice(0, 30);
   $("recent-sub").textContent = recent.length ? "newest first" : "none yet";
   $("recent").replaceChildren(...recent.map((t) => h("tr", null,
     h("td", null, fmtWhen(t.closed_at || t.entry_ts)),
-    h("td", null, swatch(t.i), t.strategy),
+    h("td", null, t.strategy),
     h("td", null, h("a", { href: `https://dexscreener.com/solana/${t.mint}`, target: "_blank", rel: "noopener noreferrer" }, t.symbol || t.mint.slice(0, 6)), " ", h("span", { class: "muted" }, t.name || "")),
     h("td", null, t.status === "open" ? "open" : "sold: " + (REASONS[t.exit_reason] || t.exit_reason),
       versioned && t.rules_version !== t.current ? h("span", { class: "gate", style: "margin-left:8px", title: "Made under an earlier version of the rules; not counted above" }, `rules v${t.rules_version}`) : null,
@@ -364,6 +418,8 @@ function render(d) {
   $("assume").replaceChildren(h("ul", { style: "margin:0;padding-left:18px;color:var(--ink2)" },
     h("li", null, "Only real pump.fun graduations are traded: a token we watched launch on the bonding curve, migrating for the first time, and not on the exclusion list of stablecoins and major tokens. PumpPortal's \"migrate\" message alone is not enough, because anyone can open a PumpSwap pool for any token."),
     limits ? h("li", null, `Slippage limit: no entry when the pool holds less than $${fmtInt(limits.min_liquidity_usd)} or the trade would move the price by more than ${limits.max_impact_pct}% (as modelled below). The entry is recorded as failed. The price must come from the launchpad's own pool, quoted in SOL.`) : null,
+    h("li", null, "Social links are the ones DexScreener shows and the ones the creator put in the token's metadata file. Anyone can paste any link there, so a rule only checks that a link is listed, not that the group or account is real."),
+    h("li", null, "A creator wallet's record (launches, graduations) is built from the launches this app has stored since 8 October. Launches made while the app was off or the computer slept are missing, so a busy wallet can look quieter than it is."),
     h("li", null, "Entry and exit happen at the next price after a signal or a stop, never at the price that triggered it. A stop set at −40% is filled wherever the price has fallen to by then."),
     h("li", null, `PumpSwap's trading fee is charged on the way in and on the way out: ${A.fee_range_pct[1]}% for a small token, falling to ${A.fee_range_pct[0]}% for the largest (pump.fun's published table).`),
     h("li", null, `Each transaction also pays ${A.priority_fee_sol} SOL in priority and network fees.`),
@@ -388,7 +444,7 @@ async function load() {
 }
 load();
 setInterval(load, 30000);
-addEventListener("resize", () => { if (last) drawChart(last); });
+addEventListener("resize", () => { if (last) drawCharts(last); });
 </script>
 </body>
 </html>

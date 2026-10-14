@@ -258,13 +258,13 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
   worse than -10%, still profitable without the best 2 trades).
 - **Sleep ruins this.** While the Mac sleeps no price is fetched and no stop is applied. The
   outage log shows the Mac asleep for about 18 of the 24 hours before the build.
-- **Affected by outage (2026-10-13, needs the restart):** a trade that went 5 minutes or more
+- **Affected by outage (2026-10-13, live since the 21:11 restart):** a trade that went 5 minutes or more
   without a price while open (`shadow.outage_gap_s`) is marked "affected by outage". Those
   trades have their own table on the page and are left out of the headline numbers, the equity
   curve and the gate. Nothing is deleted: the flag comes from `paper_trades.max_gap_s`, and the
   page also shows all trades together. Caveat: long-running trades meet outages more often than
   quick stop-outs, so leaving them out under-counts long holds, which include most big winners.
-- **Rules version 2 (2026-10-13, needs the restart).** After the first review:
+- **Rules version 2 (2026-10-13, live since the 21:11 restart).** After the first review:
   - *Slippage limit:* no entry when the pool holds under $5,000 or the modelled price impact is
     over 10%; recorded as failed, reason "slippage limit" (`shadow.entry_limits`).
   - *Real graduations only.* PumpPortal sends "migrate" whenever anyone opens a PumpSwap pool
@@ -285,7 +285,7 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
     or the engine's own rules (`ENGINE_RULES` in `radar/lab/shadow.py`) changes. Adding or
     changing one strategy leaves the others' go/no-go clocks alone. Versions are in the
     `strategy_versions` table; each trade carries its strategy's `rules_version`. The first 186
-    trades are version 1 of each strategy; version 2 starts at the next restart. Renaming a
+    trades are version 1 of each strategy; version 2 began at the 21:11 restart on 2026-10-13. Renaming a
     strategy's `name` or `description` starts nothing; renaming its file makes it a new strategy.
   - *Entry-time values:* `signal_json` and `entry_json` on each trade hold exactly what the
     engine saw (safety, on-chain authority, bot flag, Rising, score, pool, volumes). The export
@@ -293,9 +293,56 @@ Paper trading forward in time on tokens we saw graduate. No wallet, no keys, no 
 - **Export:** `uv run python -m radar.lab.export` writes `data/exports/paper_trades_<time>.csv`,
   `open_positions_<time>.csv` and a README. Read-only.
 - **Not built:** Lane A (needs trade data), several latencies (we only have one: the next
-  price), deployer reputation, risk exits on creator or early-buyer selling.
+  price), risk exits on creator or early-buyer selling.
 
-## One rule for "graduated" (2026-10-13, needs the restart)
+### Second batch of strategies (2026-10-13, live since the 21:11 restart)
+
+The user's restart at 21:11 came after every engine file was saved, so all ten strategies
+started then: version 2 of the first three, version 1 of the new ones. All the new ones use
+the slippage limit, real graduations only, the Safety only rules and 0.5 SOL.
+
+- `social_safety` (4): a Telegram link and an X link or a website. `clean_deployer` (5): the
+  creator launched 3 or fewer tokens in the last 7 days (this one included) or has an earlier
+  graduation, and never 10+ launches with no graduation. `after_boost` (6): from 10 to 30
+  minutes after graduation, price at least the first PumpSwap price (within 3 minutes of
+  graduating), 5-minute buys at least sells, liquidity within 20% of its peak since graduation.
+  `buyers_not_leaving` (7): from 2 to 5 minutes, 5-minute buys at least 1.5x sells and the
+  5-minute price change above zero. `full_stack` (8): 4 + 5 + 7 in 7's window.
+- Exit experiments `early_derisk` (E1) and `no_progress_timeout` (E2) use `entry: {same_as:
+  safety_only}`: the same entry rules, the same moments and the same simulated dropped entries,
+  so they hold exactly what Safety only holds. Changing `safety_only.yaml` restarts them too.
+- New strategy-file parts: `rules_checked_from_minutes` (rules are not looked at before this),
+  `same_as`, `exits.no_progress`, and the rules `has_telegram`, `has_x_or_website`,
+  `clean_deployer`, `min_buys_per_sell_m5`, `price_up_m5`, `min_price_vs_graduation`,
+  `max_liquidity_drop_pct`. Parts a strategy does not use do not enter its fingerprint.
+- **Deployer table:** the `deployers` view (creator wallet, launches, graduations, first and
+  last launch), built from PumpPortal create events, so it is always current. History starts
+  2026-10-08 and misses launches made while the app was off or the Mac asleep. On the existing
+  data 2,349 of 2,738 graduates would pass the deployer rule; 277 came from 10+ launch wallets
+  with no earlier graduation.
+- **Social links:** only DexScreener's links were stored, and only 27 of 2,738 graduates had a
+  Telegram link. The metadata reader now also keeps the creator's twitter, telegram and website
+  links (right kind of host only, stored as text, never fetched), and re-reads a token's file
+  when it graduates. Even so, 0 of 20 recent graduates' metadata files had a Telegram link, so
+  strategies 4 and 8 will trade very rarely.
+- **Safety timing:** strategies 7 and 8 have three minutes to see the safety rules pass. When
+  the Mac is awake the on-chain check usually lands within a minute of graduation, but about
+  half of Safety only's version 1 signals came after 5 minutes (sleep inflates that figure).
+- **Gate:** two more checks. Beat `safety_only` (`shadow.gate.benchmark`) on mean return per
+  trade over the time both ran their current rules; and a profit in each half of the strategy's
+  own test period. Safety only is the benchmark and skips the first.
+- **Saved with each trade:** social links, creator record, graduation price and liquidity peak,
+  in `signal_json` and `entry_json`; exported as `has_telegram` ... `liquidity_peak_since_graduation_usd`.
+- **Page:** a side-by-side table against Safety only; one small equity chart per strategy with
+  Safety only behind it on the same scale (three colours cannot tell ten lines apart); a "No
+  progress" column; tables now scroll inside their box on a phone.
+- **DexScreener load:** a token is refreshed once however many strategies hold it, and every
+  strategy trades only graduates that Every graduation already watches, so the extra load is
+  small. Graduations ran at 25 an hour (median), 50 at most. Worst case, every graduate held
+  24 hours: about 1,300 lookups a minute, about 44 requests, inside our 120. With the average
+  hold of about 23 minutes it is about 1 to 3 requests a minute.
+
+## One rule for "graduated" (2026-10-13, live since the 21:11 restart)
 
 `radar/lab/graduation.py`. A graduation is a token we watched launch on pump.fun's bonding
 curve that then moved to PumpSwap: either we got its first "migrate" message (that sets
@@ -325,17 +372,19 @@ All free, no keys.
 | Source | Roughly | Our cap |
 |---|---|---|
 | DexScreener prices (live refresh and follow-ups) | up to 60 a minute | 120 a minute |
-| DexScreener prices for paper positions (part of the line above; after the restart) | about 10 to 20 a minute, about 45 at worst (1,000 positions open) | shares the 120 a minute |
+| DexScreener prices for paper positions (part of the line above) | about 10 to 20 a minute, about 45 at worst (1,000 positions open) | shares the 120 a minute |
 | DexScreener profiles and boosts | 3 a minute | 20 a minute |
 | GeckoTerminal | about 2 a minute plus charts on demand | 8 a minute |
 | RugCheck | a few a minute | 12 a minute |
 | PumpPortal | one websocket connection | one |
-| Metadata links (descriptions) | 2,900 a day | 20 a minute |
-| Solana public RPC (after the restart) | up to 1,440 a day | 6 a minute |
+| Metadata links (descriptions and social links, plus one re-read per graduation) | about 3,500 a day | 20 a minute |
+| Solana public RPC | up to 1,440 a day | 6 a minute |
 
 ## Open decisions
 
-1. **Restart to switch on outage tracking.** No other action needed.
+1. **Telegram rule in strategies 4 and 8.** Almost no graduate lists a Telegram link (0 of 20
+   metadata files checked, 27 of 2,738 on DexScreener), so these two may never reach 200 trades.
+   Option: "an X link or a website" alone. Left as specified until there is live data.
 
 2. **PumpPortal trade data (blocks Phase 2b, Lane A).** PumpPortal refuses per-token trade
    subscriptions without an API key funded with about 0.02 SOL, so there is no free
@@ -367,7 +416,7 @@ All free, no keys.
 8. **Delete the archived stray files?** `data/archive/` holds 12.6 MB of leftovers that are safe
    to delete.
 
-9. **Extend the on-chain check?** It covers Rising only. Tokens that never reach Rising still
+9. **Extend the on-chain check?** It covers Rising and fresh graduations only. Tokens that never reach Rising still
    show RugCheck's reading, which was wrong for about 1.5% of checked tokens.
 
 Defaults chosen during the build, all changeable in `config/settings.yaml`: Rising cap of $50M;

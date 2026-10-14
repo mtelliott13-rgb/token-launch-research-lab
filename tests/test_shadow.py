@@ -412,12 +412,21 @@ def test_export_writes_every_trade_with_what_was_known_at_entry(tmp_path):
                                    entry_price=2.0, size_sol=0.5, tokens=24.0, tokens_left=24.0, cost_sol=0.501, peak_price=3.0, last_price=3.0, last_ts=T0 + 990)
     store.add_paper_fill(trade_id=opened, ts=T0 + 130, side="buy", reason="entry", price_usd=2.0, liquidity_usd=20_000.0, sol_usd=100.0, tokens=24.0, sol=0.501, fee_pct=1.2, impact_pct=1.5, fees_sol=0.007)
     store.add_paper_trade(strategy="safety_only", lane="B", mint="B", status="failed", signal_ts=T0 + 10, size_sol=0.5, exit_reason="entry did not land", closed_at=T0 + 30)
+    saved = {"price_usd": 1.5, "telegram": "https://t.me/a", "twitter": None, "website": "https://a.fun", "creator": "Dev", "creator_launches": 4,
+             "creator_launches_recent": 2, "creator_earlier_graduations": 1, "creator_first_seen_at": T0 - 86400, "creator_last_seen_at": T0,
+             "graduation_price": 1.2, "liquidity_peak": 61_000.0}
+    store.add_paper_trade(strategy="clean_deployer", lane="B", mint="A", status="failed", signal_ts=T0 + 10, size_sol=0.5, exit_reason="slippage limit",
+                          closed_at=T0 + 30, entry_json=__import__("json").dumps(saved))
     store.db.commit()
     store.close()
 
     trades_path, open_path, n, n_open = export.export(tmp_path / "radar.db", tmp_path / "exports", CFG, T0 + 1000)
     rows = {(r["strategy"], r["mint"]): r for r in csv.DictReader(open(trades_path))}
-    assert (n, n_open) == (3, 1) and trades_path.parent.name == "exports" and (tmp_path / "exports" / "README.txt").exists()
+    deployer = rows[("clean_deployer", "A")]
+    assert (deployer["has_telegram"], deployer["has_x"], deployer["has_website"], deployer["creator_launches_last_7d"], deployer["creator_earlier_graduations"]) == ("yes", "no", "yes", "2", "1")
+    assert (deployer["price_vs_graduation"], deployer["liquidity_peak_since_graduation_usd"], deployer["creator_first_launch_at_utc"]) == ("1.25", "61000.0", "1970-01-11T13:46:40Z")
+    assert rows[("safety_only", "A")]["has_telegram"] == ""                       # not saved for older trades
+    assert (n, n_open) == (4, 1) and trades_path.parent.name == "exports" and (tmp_path / "exports" / "README.txt").exists()
     a = rows[("safety_only", "A")]
     assert a["name"] == 'Paper, "quoted"' and a["entry_at_utc"] == "1970-01-12T13:48:45Z" and a["seconds_from_graduation_to_entry"] == "125"
     assert (a["exit_reason"], a["return_pct"], a["exit_price_usd"], a["avg_exit_price_usd"], a["took_profit_price_usd"]) == ("trailing_stop", "39.8", "1.8", "2.0", "2.2")
