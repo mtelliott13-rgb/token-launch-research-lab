@@ -308,3 +308,48 @@ def test_trades_affected_by_an_outage_are_reported_apart_and_kept_out_of_the_gat
     assert s["gate"]["status"] == "GO"                                  # judged on the 250 watched trades only
     assert s["open"] == 2 and s["open_affected"] == 1
     assert sum(t["affected"] for t in s["recent"]) >= 1 and report["assumptions"]["outage_gap_s"] == 300
+
+
+def test_export_writes_every_trade_with_what_was_known_at_entry(tmp_path):
+    import csv
+
+    from radar.db.store import Store
+    from radar.lab import export
+
+    store = Store(tmp_path / "radar.db")
+    for mint in ("A", "B"):
+        store.upsert_token(mint, source="pumpportal", first_seen_at=T0, created_at=T0, symbol=mint, name='Paper, "quoted"')
+    store.update_state("A", chain_checked_at=T0 + 50, chain_mint_authority=0, chain_freeze_authority=0)
+    store.add_safety("A", T0 + 60, {"top10_pct": 21.0, "total_holders": 300})
+    store.add_safety("A", T0 + 500, {"top10_pct": 55.0})                      # after entry: must not be used
+    store.add_snapshot("A", T0 + 124, "dexscreener", {"price_usd": 1.0, "mcap": 80_000.0, "liquidity_usd": 30_000.0, "buys_h1": 400,
+                                                       "sells_h1": 300, "price_chg_h1": 0.2, "price_chg_m5": 0.1})
+    store.add_rising_entry("A", {"ts": T0 + 100, "score": 0.9, "pattern": "graduated/buying/clean"})
+    closed = store.add_paper_trade(strategy="safety_only", lane="B", mint="A", status="closed", signal_ts=T0 + 100, signal_price=0.9, migrated_at=T0,
+                                   entry_ts=T0 + 125, entry_price=1.0, size_sol=0.5, tokens=50.0, tokens_left=0.0, cost_sol=0.501, proceeds_sol=0.7,
+                                   fees_sol=0.02, peak_price=2.6, steps_done=1, closed_at=T0 + 725, exit_reason="trailing_stop", pnl_sol=0.199,
+                                   return_pct=39.8, max_gap_s=400.0, last_price=1.8, last_ts=T0 + 725)
+    store.add_paper_fill(trade_id=closed, ts=T0 + 125, side="buy", reason="entry", price_usd=1.0, liquidity_usd=30_000.0, sol_usd=100.0, tokens=50.0, sol=0.501, fee_pct=1.2, impact_pct=1.3, fees_sol=0.007)
+    store.add_paper_fill(trade_id=closed, ts=T0 + 300, side="sell", reason="take_profit", price_usd=2.2, sol_usd=100.0, tokens=25.0, sol=0.5, fees_sol=0.007)
+    store.add_paper_fill(trade_id=closed, ts=T0 + 725, side="sell", reason="trailing_stop", price_usd=1.8, sol_usd=100.0, tokens=25.0, sol=0.2, fees_sol=0.006)
+    opened = store.add_paper_trade(strategy="every_graduation", lane="B", mint="B", status="open", signal_ts=T0, migrated_at=T0, entry_ts=T0 + 130,
+                                   entry_price=2.0, size_sol=0.5, tokens=24.0, tokens_left=24.0, cost_sol=0.501, peak_price=3.0, last_price=3.0, last_ts=T0 + 990)
+    store.add_paper_fill(trade_id=opened, ts=T0 + 130, side="buy", reason="entry", price_usd=2.0, liquidity_usd=20_000.0, sol_usd=100.0, tokens=24.0, sol=0.501, fee_pct=1.2, impact_pct=1.5, fees_sol=0.007)
+    store.add_paper_trade(strategy="safety_only", lane="B", mint="B", status="failed", signal_ts=T0 + 10, size_sol=0.5, exit_reason="entry did not land", closed_at=T0 + 30)
+    store.db.commit()
+    store.close()
+
+    trades_path, open_path, n, n_open = export.export(tmp_path / "radar.db", tmp_path / "exports", CFG, T0 + 1000)
+    rows = {(r["strategy"], r["mint"]): r for r in csv.DictReader(open(trades_path))}
+    assert (n, n_open) == (3, 1) and trades_path.parent.name == "exports" and (tmp_path / "exports" / "README.txt").exists()
+    a = rows[("safety_only", "A")]
+    assert a["name"] == 'Paper, "quoted"' and a["entry_at_utc"] == "1970-01-12T13:48:45Z" and a["seconds_from_graduation_to_entry"] == "125"
+    assert (a["exit_reason"], a["return_pct"], a["exit_price_usd"], a["avg_exit_price_usd"], a["took_profit_price_usd"]) == ("trailing_stop", "39.8", "1.8", "2.0", "2.2")
+    assert (a["affected_by_outage"], a["top10_pct"], a["safety_report_age_s"], a["total_holders"]) == ("yes", "21.0", "65", "300")
+    assert (a["mint_authority_revoked_onchain"], a["chain_checked_before_entry"], a["bot_volume_flag"], a["on_rising_by_entry"]) == ("yes", "yes", "yes", "yes")
+    assert float(a["entry_price_paid_usd"]) == pytest.approx(1.002) and a["entry_mcap_usd"] == "80000.0"
+    failed = rows[("safety_only", "B")]
+    assert failed["status"] == "failed" and failed["entry_at_utc"] == "" and failed["affected_by_outage"] == "" and failed["on_rising_by_entry"] == "no"
+    (position,) = list(csv.DictReader(open(open_path)))
+    assert position["mint"] == "B" and position["price_multiple_now"] == "1.5" and position["share_still_held"] == "1.0"
+    assert float(position["pnl_now_before_costs_sol"]) == pytest.approx(24 * 3.0 / 100 - 0.501) and position["affected_by_outage"] == "no"
