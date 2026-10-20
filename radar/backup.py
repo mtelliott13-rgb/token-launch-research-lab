@@ -1,11 +1,12 @@
-"""Daily backup of the database, made with SQLite's own backup command and gzip-compressed.
+"""Daily backup of the database, made with SQLite's own backup command and zstd-compressed.
 
 A plain file copy of a database that is being written can catch it half-way through a write;
 SQLite's backup command copies a consistent moment instead, while the collectors keep writing.
 
 Layout of the backup folder (backup.folder, outside the project on purpose):
-  daily/radar-YYYY-MM-DD_HHMM.db.gz    the newest backup.keep_daily backups
-  weekly/radar-YYYY-MM-DD_HHMM.db.gz   the first backup of each week, newest backup.keep_weekly kept
+  daily/radar-YYYY-MM-DD_HHMM.db.zst   the newest backup.keep_daily backups
+  weekly/radar-YYYY-MM-DD_HHMM.db.zst  the first backup of each week, newest backup.keep_weekly kept
+Backups made before 2026-10-19 are gzip (.db.gz); they are listed, kept, aged out and restored the same way.
 A weekly file is a hard link to its daily file while both exist, so it takes no extra space.
 Old files are only removed after a new backup has been made and checked.
 
@@ -27,15 +28,16 @@ import socket
 import sqlite3
 import sys
 import time
+from compression import zstd
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from radar.config import ROOT, load_settings
 
 log = logging.getLogger("radar.backup")
 NAME = "backup"
 STAMP = "%Y-%m-%d_%H%M"
-FILE = re.compile(r"^radar-(\d{4}-\d{2}-\d{2}_\d{4})\.db\.gz$")
+FILE = re.compile(r"^radar-(\d{4}-\d{2}-\d{2}_\d{4})\.db\.(gz|zst)$")
 CHUNK = 4 << 20
 
 
@@ -45,6 +47,11 @@ def folder_of(cfg: dict[str, Any]) -> Path:
 
 def db_path_of(cfg: dict[str, Any]) -> Path:
     return ROOT / cfg["database"]["path"]
+
+
+def open_backup(path: Path) -> IO[bytes]:
+    """Read a backup file, zstd or (older ones) gzip."""
+    return gzip.open(path, "rb") if path.name.endswith(".gz") else zstd.open(path, "rb")
 
 
 def backups(folder: Path, kind: str) -> list[Path]:
@@ -81,7 +88,8 @@ def _prune(folder: Path, kind: str, keep: int) -> list[str]:
     return [p.name for p in gone]
 
 
-def make_backup(db_path: Path, folder: Path, now: float, keep_daily: int, keep_weekly: int, min_free_bytes: int = 0) -> dict[str, Any]:
+def make_backup(db_path: Path, folder: Path, now: float, keep_daily: int, keep_weekly: int, min_free_bytes: int = 0,
+                level: int = 3) -> dict[str, Any]:
     """Make one backup: copy, check, compress, file it, then drop the oldest. Raises on any failure,
     leaving the existing backups untouched."""
     for kind in ("daily", "weekly"):
@@ -93,8 +101,8 @@ def make_backup(db_path: Path, folder: Path, now: float, keep_daily: int, keep_w
         raise OSError(f"not enough free disk for a backup: {free / 1e9:.1f} GB free, need {(db_size + min_free_bytes) / 1e9:.1f} GB")
 
     started = time.monotonic()
-    name = f"radar-{time.strftime(STAMP, time.localtime(now))}.db.gz"
-    partial = folder / f".{name[:-3]}.partial"
+    name = f"radar-{time.strftime(STAMP, time.localtime(now))}.db.zst"
+    partial = folder / f".{name[:-4]}.partial"
     daily = folder / "daily" / name
     try:
         src = sqlite3.connect(db_path, timeout=60)  # only read from
@@ -109,7 +117,7 @@ def make_backup(db_path: Path, folder: Path, now: float, keep_daily: int, keep_w
             raise sqlite3.DatabaseError(f"the backup copy failed its check: {check}")
         copied = partial.stat().st_size
         tmp = daily.with_name(daily.name + ".tmp")
-        with open(partial, "rb") as fin, gzip.open(tmp, "wb", compresslevel=6) as fout:
+        with open(partial, "rb") as fin, zstd.open(tmp, "wb", level=level) as fout:
             shutil.copyfileobj(fin, fout, CHUNK)
         os.replace(tmp, daily)
     finally:
@@ -137,7 +145,9 @@ def make_backup(db_path: Path, folder: Path, now: float, keep_daily: int, keep_w
 def folder_bytes(folder: Path) -> int:
     """Space the backups take on disk, counting a hard-linked file once."""
     seen, total = set(), 0
-    for p in folder.glob("*/radar-*.db.gz"):
+    for p in folder.glob("*/radar-*.db.*"):
+        if not FILE.match(p.name):
+            continue
         st = p.stat()
         if (st.st_dev, st.st_ino) not in seen:
             seen.add((st.st_dev, st.st_ino))
@@ -161,7 +171,7 @@ async def run(ctx: Any) -> None:
         if due(folder, now, every_s):
             try:
                 done = await asyncio.to_thread(
-                    make_backup, db_path, folder, now, cfg["keep_daily"], cfg["keep_weekly"], int(cfg["min_free_gb"] * 1e9))
+                    make_backup, db_path, folder, now, cfg["keep_daily"], cfg["keep_weekly"], int(cfg["min_free_gb"] * 1e9), cfg["zstd_level"])
             except Exception as exc:  # noqa: BLE001 - try again at the next check
                 log.warning("backup failed: %s", exc)
                 ctx.health.error(NAME, exc)
@@ -187,7 +197,7 @@ def restore(cfg: dict[str, Any], backup: Path) -> Path:
         raise SystemExit("Meme Radar is still running. Stop it first (Ctrl+C in its terminal), then run this again.")
     db_path = db_path_of(cfg)
     incoming = db_path.with_name(db_path.name + ".restoring")
-    with gzip.open(backup, "rb") as fin, open(incoming, "wb") as fout:
+    with open_backup(backup) as fin, open(incoming, "wb") as fout:
         shutil.copyfileobj(fin, fout, CHUNK)
     con = sqlite3.connect(incoming)
     try:
@@ -218,7 +228,7 @@ def main(argv: list[str]) -> None:
         print(f"Total on disk: {folder_bytes(folder) / 1e6:,.0f} MB in {folder}" if folder.exists() else f"No backups yet in {folder}")
     elif what == "now":
         c = cfg["backup"]
-        done = make_backup(db_path_of(cfg), folder, time.time(), c["keep_daily"], c["keep_weekly"], int(c["min_free_gb"] * 1e9))
+        done = make_backup(db_path_of(cfg), folder, time.time(), c["keep_daily"], c["keep_weekly"], int(c["min_free_gb"] * 1e9), c["zstd_level"])
         print(f"Made {done['file']}: {done['compressed_bytes'] / 1e6:,.0f} MB (database {done['database_bytes'] / 1e6:,.0f} MB) "
               f"in {done['seconds']:.0f}s{'; also kept as this week' + chr(39) + 's weekly copy' if done['weekly'] else ''}. "
               f"Backups now use {done['folder_bytes'] / 1e6:,.0f} MB.")

@@ -153,6 +153,8 @@ async def refresh_batch(ctx: Ctx, batch: list[dict[str, Any]]) -> None:
     with store.tx():
         for row in batch:
             mint, pair = row["mint"], best.get(row["mint"])
+            # For the shadow bot: when the token's previous price came in, and when this check was due.
+            row["price_prev_at"], row["check_due_at"] = row.get("snapshot_ts"), row.get("next_refresh_at")
             if pair:
                 info = pair_token_info(pair)
                 store.upsert_token(mint, source=row["source"], first_seen_at=row["first_seen_at"], **info)
@@ -180,7 +182,7 @@ async def refresh_loop(ctx: Ctx) -> None:
     last_backlog_log = 0.0
     while True:
         try:
-            due = ctx.store.due(time.time(), per_cycle)
+            due = ctx.store.due(time.time(), per_cycle, ctx.cfg["refresh"]["graduated_first_s"])
             for i in range(0, len(due), cfg["batch_size"]):
                 await refresh_batch(ctx, due[i : i + cfg["batch_size"]])
             backlog = ctx.store.count_due(time.time())

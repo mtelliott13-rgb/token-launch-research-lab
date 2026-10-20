@@ -473,12 +473,13 @@ class Store:
         marks = ", ".join("?" * len(mints))
         return [dict(r) for r in self.db.execute(f"{ROW_SQL} WHERE t.mint IN ({marks})", mints)]
 
-    def due(self, now: float, limit: int) -> list[dict[str, Any]]:
-        """Tokens whose pair data is due for a refresh: watched, then paper positions, then most overdue."""
+    def due(self, now: float, limit: int, graduated_first_s: float = 0) -> list[dict[str, Any]]:
+        """Tokens whose pair data is due for a refresh: watched, then paper positions, then tokens that
+        graduated within the last `graduated_first_s` seconds, then most overdue."""
         cur = self.db.execute(
             f"{ROW_SQL} WHERE s.next_refresh_at <= ? "
-            "ORDER BY s.watched DESC, s.paper_refresh_s IS NOT NULL DESC, s.next_refresh_at LIMIT ?",
-            (now, limit),
+            "ORDER BY s.watched DESC, s.paper_refresh_s IS NOT NULL DESC, COALESCE(s.migrated_at > ?, 0) DESC, s.next_refresh_at LIMIT ?",
+            (now, now - graduated_first_s, limit),
         )
         return [dict(r) for r in cur]
 

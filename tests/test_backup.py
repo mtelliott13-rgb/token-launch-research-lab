@@ -1,4 +1,4 @@
-"""Daily database backup: consistent copy, compressed, 3 daily + 4 weekly kept, restorable."""
+"""Daily database backup: consistent copy, zstd-compressed, 3 daily + 2 weekly kept, restorable (old gzip ones too)."""
 import gzip
 import sqlite3
 import time
@@ -20,7 +20,8 @@ def make_db(path, rows):
 
 def count(gz_path, tmp_path):
     out = tmp_path / "check.db"
-    out.write_bytes(gzip.decompress(gz_path.read_bytes()))
+    with backup.open_backup(gz_path) as f:
+        out.write_bytes(f.read())
     con = sqlite3.connect(out)
     try:
         return con.execute("SELECT count(*) FROM t").fetchone()[0]
@@ -41,15 +42,15 @@ def test_a_backup_includes_writes_still_in_the_wal_and_is_compressed(tmp_path):
     assert done["folder_bytes"] == done["compressed_bytes"]          # the weekly copy is a hard link
 
 
-def test_keeps_three_daily_and_four_weekly(tmp_path):
+def test_keeps_three_daily_and_two_weekly(tmp_path):
     db, folder = tmp_path / "radar.db", tmp_path / "backups"
     make_db(db, 10).close()
     start = time.mktime((2026, 10, 1, 4, 0, 0, 0, 0, -1))             # a Thursday
     for day in range(40):
-        backup.make_backup(db, folder, start + day * DAY, 3, 4)
+        backup.make_backup(db, folder, start + day * DAY, 3, 2)
     dates = lambda kind: [p.name[6:16] for p in backup.backups(folder, kind)]  # the clocks change on the way
     assert dates("daily") == ["2026-11-07", "2026-11-08", "2026-11-09"]
-    assert dates("weekly") == ["2026-10-19", "2026-10-26", "2026-11-02", "2026-11-09"]  # the first of each week
+    assert dates("weekly") == ["2026-11-02", "2026-11-09"]                                # the first of each week
     assert backup.due(folder, start + 39 * DAY + 23 * 3600, DAY) is False
     assert backup.due(folder, start + 40 * DAY, DAY) is True
 
@@ -80,3 +81,26 @@ def test_restore_keeps_the_replaced_database_and_refuses_while_running(tmp_path,
     old = sqlite3.connect(archive / "radar.db")
     assert old.execute("SELECT count(*) FROM t").fetchone()[0] == 10
     old.close()
+
+
+def test_old_gzip_backups_are_listed_aged_out_and_restorable(tmp_path, monkeypatch):
+    db, folder = tmp_path / "radar.db", tmp_path / "backups"
+    make_db(db, 4).close()
+    old_day = time.mktime((2026, 10, 14, 13, 27, 0, 0, 0, -1))
+    for kind in ("daily", "weekly"):                                   # as the gzip version left them
+        (folder / kind).mkdir(parents=True)
+        (folder / kind / "radar-2026-10-14_1327.db.gz").write_bytes(gzip.compress(db.read_bytes()))
+    assert count(folder / "daily" / "radar-2026-10-14_1327.db.gz", tmp_path) == 4
+    done = backup.make_backup(db, folder, old_day + 5 * DAY, 3, 2)
+    assert done["file"].endswith(".db.zst") and backup.folder_bytes(folder) > done["compressed_bytes"]
+    assert [p.name for p in backup.backups(folder, "daily")] == ["radar-2026-10-14_1327.db.gz", "radar-2026-10-19_1327.db.zst"]
+    for day in (6, 7):
+        backup.make_backup(db, folder, old_day + day * DAY, 3, 2)
+    assert all(p.name.endswith(".zst") for p in backup.backups(folder, "daily"))   # the gzip daily aged out
+    assert backup.backups(folder, "weekly")[0].name.endswith(".gz")                # still one of the 2 weeklies
+    make_db(db, 1).close()
+    monkeypatch.setattr(backup, "app_is_running", lambda cfg: False)
+    backup.restore({"database": {"path": str(db)}, "server": {"port": 1}}, backup.backups(folder, "weekly")[0])
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM t").fetchone()[0] == 4
+    con.close()

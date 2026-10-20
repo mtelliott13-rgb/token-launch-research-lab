@@ -17,9 +17,9 @@ If the terminal says `uv: command not found`, use `~/.local/bin/uv run python -m
 
 Pages: Dashboard (`/`), Data (`/data`), Patterns (`/patterns`), Shadow Bot (`/shadow`).
 
-**A restart is pending** for the social rule of social_safety and full_stack (2026-10-13) and
-the daily database backup (2026-10-14). Everything else below has been live since the restart
-on 2026-10-13 at 21:11.
+**A restart is pending** (2026-10-19) for zstd backups, the refresh queue change and engine
+version 3 (every strategy starts a new rules version). Everything else below has been live
+since the restart on 2026-10-14 at 13:53.
 
 ## What exists
 
@@ -366,25 +366,55 @@ curve that then moved to PumpSwap: either we got its first "migrate" message (th
 - Retention: a token with a pool but no graduation is no longer kept in full for that reason
   alone; it needs the $30K peak (or $10K or Rising for its first 4 hours), like any other.
 
-## Daily database backup (2026-10-14, needs the restart)
+## Daily database backup (2026-10-14, live since the 13:53 restart)
 
 `radar/backup.py`, settings under `backup:`. Once a day the app copies the database with
 SQLite's own backup command (a consistent moment, while the collectors keep writing), checks
-the copy, and gzips it into `~/meme-radar-backups/` (the user asked for this folder outside the
-project). Kept: the newest 3 in `daily/`, and the first backup of each week in `weekly/`, newest
-4 (a hard link while it is also a daily, so no extra space). Old files are removed only after a
+the copy, and compresses it into `~/meme-radar-backups/` (the user asked for this folder outside
+the project). Kept: the newest 3 in `daily/`, and the first backup of each week in `weekly/`,
+newest 2 (a hard link while it is also a daily, so no extra space). From 2026-10-19 (needs the
+restart) backups are zstd level 3 (`.db.zst`), about 45% smaller than gzip and faster (tested on
+a 400 MB slice: gzip 0.547 of the original, zstd 3 0.305); the older `.db.gz` files are listed,
+aged out and restored the same way. Old files are removed only after a
 new backup succeeded. It is skipped, with an error on the Data page, if the disk would be left
 with under 2 GB free. A Mac that slept makes its backup on waking (it is due 24 hours after the
 newest one).
 
 - First backup, made by hand on 2026-10-14 at 13:27: database 1,244 MB -> 557 MB in 75 seconds,
   restored to a scratch copy and checked (169,378 tokens, 1,716 paper trades).
-- Disk: at most 6 distinct files (3 daily + 4 weekly, one shared), about 3.3 GB at today's size,
-  growing with the database, plus a temporary uncompressed copy (about 1.2 GB) for a minute
-  during each backup. The Mac had 13 GB free on 2026-10-14.
+- Disk (corrected 2026-10-19): the database grows about 220 MB a day (every launch's record
+  ~105, full snapshots of graduates and $10K+ tokens ~87, safety reports ~17, paper trades ~7),
+  so about 9 GB by 2026-11-16. Backups then: about 8.5 GB with zstd and 3 daily + 2 weekly
+  (gzip and 4 weeklies would have been 19.8 GB and run out of room around 2026-11-13). Each
+  backup also needs an uncompressed copy of the database for a few minutes. 31 GB free on
+  2026-10-19. The user chose to keep all data (no stricter retention) for now.
+- "Snapshot writes doubled on 2026-10-14" was a measuring mistake: older days looked smaller
+  because retention had already deleted their dead tokens' snapshots. The hourly rate has been
+  about 20,000 since the evening of 2026-10-13. The one real increase is intended: since the
+  shadow bot started, each graduate is priced every 20 s for the first hour of a paper position
+  and every 60 s after, about 110 more snapshots per graduate (about 20 MB a day).
 - `uv run python -m radar.backup list` shows them, `... now` makes one, and
   `... restore FILE` puts one back (refuses while the app is running; the replaced database is
   moved to `data/archive/radar-before-restore-<time>/`).
+
+## Refresh queue and engine version 3 (2026-10-19, needs the restart)
+
+- The DexScreener refresh loop takes up to 180 due tokens per cycle, then pauses 5 s, so it
+  handles about 1,300 tokens a minute at about 41 requests a minute (cap 120, never rate
+  limited). Busy minutes leave 200 to 400 tokens waiting, the oldest 10 to 30 s late; the log
+  line says "rate limit budget" but it is this pacing. Open paper positions and pending entries
+  already went first; tokens in their entry window did not (up to about 23 s late; first price
+  after graduation median 37 s, 90th percentile 49 s, measured 2026-10-15 to 19).
+- Now: for 30 minutes after graduating (`refresh.graduated_first_s`), a token goes ahead of other
+  due tokens; only watched tokens and paper positions go before it. Its refresh interval is
+  unchanged.
+- `ENGINE_RULES` 3: every strategy starts a new rules version at the restart, because entry
+  timing changes. Earlier versions' trades stay in the database and the export, like version 1.
+  Each trade now also saves, at the signal check and at entry, `price_age_s` (how long the token
+  had gone without a price when the price used came in) and `check_late_s` (how late that check
+  was against its schedule); export columns `price_age_at_*_s` and `check_late_at_*_s`.
+- Checked before the restart: under engine 2 every strategy's code matches its live version, the
+  `shadow:` settings and `strategies/` files are unchanged, and with engine 3 all ten get new codes.
 
 ## Outside requests, per day
 

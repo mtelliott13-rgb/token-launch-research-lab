@@ -11,7 +11,7 @@ logging:
   dir: data/logs
   level: INFO
 
-# Daily database backup (SQLite's own backup command, then gzip), checked every check_every_s.
+# Daily database backup (SQLite's own backup command, then zstd), checked every check_every_s.
 # A backup is made when the newest one is every_hours old, so a Mac that slept catches up on wake.
 # The first backup of each week is also kept as a weekly copy. See radar/backup.py to list or restore.
 backup:
@@ -19,7 +19,8 @@ backup:
   folder: ~/meme-radar-backups
   every_hours: 24
   keep_daily: 3
-  keep_weekly: 4
+  keep_weekly: 2
+  zstd_level: 3                # about 45% smaller than the gzip used before, and faster
   check_every_s: 600
   first_check_after_s: 600
   min_free_gb: 2               # skip (and show an error) rather than fill the disk
@@ -255,6 +256,8 @@ refresh:
   first_delay_s: 20             # wait after creation so DexScreener has indexed it
   watched_s: 10
   featured_s: 30                # trending, Rising, recently boosted/profiled, just graduated
+  graduated_first_s: 1800       # for this long after graduating, a token is refreshed before other due tokens
+                                # (only watched tokens and open paper positions go ahead of it)
   featured_migrated_window_s: 3600
   featured_trending_window_s: 600
   featured_rising_window_s: 120

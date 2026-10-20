@@ -329,10 +329,13 @@ def test_paper_positions_jump_the_refresh_queue_and_new_graduates_get_a_chain_ch
                             ("CHECKED", {"migrated_at": T0 - 60, "chain_checked_at": T0 - 30}), ("LONGAGO", {"migrated_at": T0 - 90_000})):
             store.upsert_token(mint, source="pumpportal", first_seen_at=T0 - 500, created_at=T0 - 500)
             store.update_state(mint, next_refresh_at=T0 - (300 if mint == "OLD" else 5), **extra)
-        return [r["mint"] for r in store.due(T0, 2)], [r["mint"] for r in store.graduated_unchecked(T0 - CFG["onchain"]["graduated_window_s"], 10)]
+        return ([r["mint"] for r in store.due(T0, 2)], [r["mint"] for r in store.graduated_unchecked(T0 - CFG["onchain"]["graduated_window_s"], 10)],
+                [r["mint"] for r in store.due(T0, 10, CFG["refresh"]["graduated_first_s"])])
 
-    (due, unchecked), _, _ = run(lambda request: None, flow)
+    (due, unchecked, graduates_first), _, _ = run(lambda request: None, flow)
     assert due[0] == "PAPER" and unchecked == ["GRAD"]
+    # Graduated in the last 30 minutes: ahead of tokens that have waited longer, behind paper positions.
+    assert graduates_first[0] == "PAPER" and set(graduates_first[1:3]) == {"GRAD", "CHECKED"} and graduates_first[3:] == ["OLD", "LONGAGO"]
 
 
 def test_the_page_report_reads_a_database_file_on_its_own_connection(tmp_path):
@@ -414,7 +417,7 @@ def test_export_writes_every_trade_with_what_was_known_at_entry(tmp_path):
     store.add_paper_trade(strategy="safety_only", lane="B", mint="B", status="failed", signal_ts=T0 + 10, size_sol=0.5, exit_reason="entry did not land", closed_at=T0 + 30)
     saved = {"price_usd": 1.5, "telegram": "https://t.me/a", "twitter": None, "website": "https://a.fun", "creator": "Dev", "creator_launches": 4,
              "creator_launches_recent": 2, "creator_earlier_graduations": 1, "creator_first_seen_at": T0 - 86400, "creator_last_seen_at": T0,
-             "graduation_price": 1.2, "liquidity_peak": 61_000.0}
+             "graduation_price": 1.2, "liquidity_peak": 61_000.0, "price_age_s": 41.26, "check_late_s": 3.04}
     store.add_paper_trade(strategy="clean_deployer", lane="B", mint="A", status="failed", signal_ts=T0 + 10, size_sol=0.5, exit_reason="slippage limit",
                           closed_at=T0 + 30, entry_json=__import__("json").dumps(saved))
     store.db.commit()
@@ -426,6 +429,7 @@ def test_export_writes_every_trade_with_what_was_known_at_entry(tmp_path):
     assert (deployer["has_telegram"], deployer["has_x"], deployer["has_website"], deployer["creator_launches_last_7d"], deployer["creator_earlier_graduations"]) == ("yes", "no", "yes", "2", "1")
     assert (deployer["price_vs_graduation"], deployer["liquidity_peak_since_graduation_usd"], deployer["creator_first_launch_at_utc"]) == ("1.25", "61000.0", "1970-01-11T13:46:40Z")
     assert rows[("safety_only", "A")]["has_telegram"] == ""                       # not saved for older trades
+    assert (deployer["price_age_at_entry_s"], deployer["check_late_at_entry_s"], deployer["price_age_at_signal_s"]) == ("41.3", "3.0", "")
     assert (n, n_open) == (4, 1) and trades_path.parent.name == "exports" and (tmp_path / "exports" / "README.txt").exists()
     a = rows[("safety_only", "A")]
     assert a["name"] == 'Paper, "quoted"' and a["entry_at_utc"] == "1970-01-12T13:48:45Z" and a["seconds_from_graduation_to_entry"] == "125"
@@ -705,3 +709,15 @@ def test_socials_and_deployer_stats_are_saved_with_each_trade():
         assert (saw["telegram"], saw["twitter"], saw["website"], saw["creator"]) == ("https://t.me/p", "https://x.com/p", None, "Dev")
         assert saw["creator_launches"] is None and saw["graduation_price"] == 1.0     # no launches by "Dev" are stored here
     assert "social_safety" in trades
+
+
+def test_price_age_and_queue_wait_are_saved_at_the_signal_and_at_entry():
+    import json
+
+    trades, _, _ = engine([(125, 1.00, {"price_prev_at": T0 + 95, "check_due_at": T0 + 118}), (150, 1.0, {"price_prev_at": T0 + 125, "check_due_at": T0 + 150})])
+    t = trades["every_graduation"]
+    signal, entry = json.loads(t["signal_json"]), json.loads(t["entry_json"])
+    assert (signal["price_age_s"], signal["check_late_s"]) == (30.0, 7.0)
+    assert (entry["price_age_s"], entry["check_late_s"]) == (30.0, 7.0)          # entered on that same price
+    late = engine([(125, 1.00)])[0]["every_graduation"]                         # nothing known: blank, never a guess
+    assert json.loads(late["entry_json"])["price_age_s"] is None

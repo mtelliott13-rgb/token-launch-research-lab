@@ -39,7 +39,9 @@ START_KEY = "shadow_started_at"                    # when paper trading first be
 # Raise this when the engine itself starts treating trades differently (not for settings or
 # strategy files, which are picked up by themselves). Every strategy then gets a new version.
 #   2 = slippage limit; only verified pump.fun graduations are traded (2026-10-13)
-ENGINE_RULES = 2
+#   3 = tokens go to the front of the refresh queue for 30 minutes after graduating, so entry-window
+#       prices arrive sooner; price age saved at signal and entry (2026-10-19)
+ENGINE_RULES = 3
 # The shared settings that change what a trade does. Changing one starts a new version of every strategy.
 RULE_SETTINGS = ("fees", "slippage", "entry_limits", "entry_fail_pct", "exit_late_pct", "max_entry_wait_s", "no_price_misses", "rising_fresh_s",
                  "graduation_price_within_s", "deployer_window_days")
@@ -188,6 +190,10 @@ def seen(row: Mapping[str, Any], snap: Mapping[str, Any], now: float, cfg: Mappi
         on_rising=bool(row.get("score") is not None and now - (row.get("rising_seen_at") or 0) <= cfg["rising_fresh_s"]),
         seconds_since_graduation=now - row["migrated_at"] if row.get("migrated_at") else None,
         safety_age_s=now - row["safety_ts"] if row.get("safety_ts") else None,
+        # How long the token had gone without a price when this one came in, and how late this check
+        # was against its refresh schedule (the queue). Saved from engine version 3 on.
+        price_age_s=now - row["price_prev_at"] if row.get("price_prev_at") else None,
+        check_late_s=max(0.0, now - row["check_due_at"]) if row.get("check_due_at") else None,
     )
     return json.dumps(values)
 

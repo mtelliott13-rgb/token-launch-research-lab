@@ -40,6 +40,7 @@ TRADE_COLUMNS = (
     "has_telegram", "has_x", "has_website", "telegram_link", "x_link", "website_link",
     "creator", "creator_launches", "creator_launches_last_7d", "creator_earlier_graduations", "creator_first_launch_at_utc", "creator_last_launch_at_utc",
     "graduation_price_usd", "price_vs_graduation", "liquidity_peak_since_graduation_usd",
+    "price_age_at_signal_s", "check_late_at_signal_s", "price_age_at_entry_s", "check_late_at_entry_s",
 )
 OPEN_COLUMNS = (
     "trade_id", "strategy", "mint", "symbol", "name", "entry_at_utc", "entry_price_usd", "size_sol", "cost_sol",
@@ -75,6 +76,11 @@ creator_*            the creator wallet's record in our own data when it entered
 graduation_price_usd the first PumpSwap price within 3 minutes of graduating; price_vs_graduation = entry price / that.
 liquidity_peak_since_graduation_usd   the pool's highest liquidity between graduation and entry.
 exit_reason          also "no_progress" (E2: did not reach 1.2x within 10 minutes).
+price_age_at_*_s     at the signal check and at entry (or the failed entry): how many seconds the token had gone
+                     without a price when the price used came in, i.e. how long the bot could not see it before.
+check_late_at_*_s    how many seconds that check came after it was due (time spent waiting in the refresh queue).
+                     Both saved from 2026-10-19 (engine version 3); blank before. On 2026-10-19 every strategy started
+                     a new rules version, when just-graduated tokens were moved up the refresh queue.
 
 Where the rebuilt "at entry" columns come from (for failed and pending trades: at the signal instead):
   entry_liquidity_usd, entry_fee_pct, entry_price_impact_pct, sol_usd_at_entry   saved with the buy itself
@@ -98,6 +104,10 @@ def _iso(ts: float | None) -> str | None:
 
 def _yes(value: Any) -> str | None:
     return None if value is None else ("yes" if value else "no")
+
+
+def _secs(value: float | None) -> float | None:
+    return None if value is None else round(value, 1)
 
 
 def _one(db: sqlite3.Connection, sql: str, args: tuple) -> Mapping[str, Any]:
@@ -188,8 +198,12 @@ def trade_row(db: sqlite3.Connection, t: Mapping[str, Any], cfg: Mapping[str, An
                 price_vs_graduation=round(saw["price_usd"] / saw["graduation_price"], 4) if saw.get("graduation_price") and saw.get("price_usd") else None,
                 liquidity_peak_since_graduation_usd=saw.get("liquidity_peak"),
             )
+    if saw:
+        row.update(price_age_at_entry_s=_secs(saw.get("price_age_s")), check_late_at_entry_s=_secs(saw.get("check_late_s")))
     if t.get("signal_json"):
-        row["on_rising_at_signal"] = _yes(json.loads(t["signal_json"]).get("on_rising"))
+        signal = json.loads(t["signal_json"])
+        row.update(on_rising_at_signal=_yes(signal.get("on_rising")), price_age_at_signal_s=_secs(signal.get("price_age_s")),
+                   check_late_at_signal_s=_secs(signal.get("check_late_s")))
     return row
 
 
