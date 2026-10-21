@@ -1,4 +1,5 @@
 """Fetching token descriptions from creator-supplied metadata links."""
+import asyncio
 import time
 
 import httpx
@@ -36,6 +37,7 @@ def test_links_we_have_no_reason_to_trust_are_not_fetched():
         f"https://ipfs.io/ipfs/{CID}/../../admin",               # path tricks after the cid
         f"https://ipfs.io/ipfs/{CID}?redirect=http://10.0.0.1",
         "file:///etc/passwd", "javascript:alert(1)", "", None, 42, "https://[bad",
+        "https://your-domain.comblob:https://pump.fun/6875cd63-8808-47ad-ad5a-3c815716de87",  # port that is not a number (seen 2026-10-19)
     ]
     assert [u for u in refused if metadata.fetch_urls(u, CFG)] == []
 
@@ -178,3 +180,30 @@ def test_fetch_saves_the_social_links_without_overwriting_dexscreeners():
     result, ctx, _ = run(handler, flow)
     row = ctx.store.row(FRANK)
     assert result == "done" and (row["twitter"], row["telegram"], row["website"]) == ("https://x.com/from_dexscreener", "https://t.me/meta", "https://meta.fun")
+
+
+def test_a_token_that_breaks_the_fetch_does_not_hold_up_the_queue(monkeypatch):
+    """2026-10-19 to 10-21: one malformed link crashed the collector before every older token, for two days."""
+    handler, calls = serve({FILEBASE: httpx.Response(200, json={"description": "fine"})})
+    real = metadata.fetch_one
+
+    async def fetch_one(ctx, row, now):
+        if row["mint"] == "ODD":
+            raise RuntimeError("something nobody planned for")
+        return await real(ctx, row, now)
+    monkeypatch.setattr(metadata, "fetch_one", fetch_one)
+
+    async def flow(ctx):
+        now = time.time()
+        for mint, seen_at in (("ODD", now), ("OLDER", now - 60)):   # newest first, so ODD comes up first
+            seeded(ctx, mint, f"https://ipfs.io/ipfs/{CID}", desc_state="wanted")
+            ctx.store.upsert_token(mint, source="pumpportal", first_seen_at=seen_at)
+        ctx.store.db.execute("UPDATE tokens SET first_seen_at = ? WHERE mint = 'OLDER'", (now - 60,))
+        try:
+            await asyncio.wait_for(metadata.run(ctx), timeout=1)      # one pass, then it sleeps
+        except TimeoutError:
+            pass
+        return {m: ctx.store.row(m)["desc_state"] for m in ("ODD", "OLDER")}
+
+    states, ctx, _ = run(handler, flow)
+    assert states == {"ODD": "failed", "OLDER": "done"} and ctx.description_counts["failed"] == 1

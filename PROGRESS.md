@@ -397,7 +397,7 @@ newest one).
   `... restore FILE` puts one back (refuses while the app is running; the replaced database is
   moved to `data/archive/radar-before-restore-<time>/`).
 
-## Refresh queue and engine version 3 (2026-10-19, needs the restart)
+## Refresh queue and engine version 3 (2026-10-19, live since the 2026-10-20 12:56 restart)
 
 - The DexScreener refresh loop takes up to 180 due tokens per cycle, then pauses 5 s, so it
   handles about 1,300 tokens a minute at about 41 requests a minute (cap 120, never rate
@@ -415,6 +415,24 @@ newest one).
   was against its schedule); export columns `price_age_at_*_s` and `check_late_at_*_s`.
 - Checked before the restart: under engine 2 every strategy's code matches its live version, the
   `shadow:` settings and `strategies/` files are unchanged, and with engine 3 all ten get new codes.
+
+## Metadata collector crash loop (2026-10-19 09:09 to the next restart)
+
+- One token's metadata link, `https://your-domain.comblob:https://pump.fun/...`, has a "port"
+  that is not a number. `fetch_urls` read the port outside its `try`, so the collector crashed on
+  that token, restarted after up to 60 s, and crashed on it again: 1,123 times by 2026-10-21 12:49.
+- The queue is newest first, so newer tokens were still read before each crash. Lost: the 18
+  older queued tokens behind it (none graduated) never got a description or links. Slower: links
+  for new graduates arrived a median 37 s after graduation (90th percentile 62 s), against 8 s
+  (15 s) before, because the crash backoff replaced the 15 s pause.
+- Effect on the shadow bot: none found. Rules are checked on every price for 60 minutes and entry
+  is never before 2 minutes, so the late links arrived in time. Social + safety and Full stack
+  trades still had a metadata-file link at the signal (317 of 336 and 46 of 48; before: 866 of
+  890 and 75 of 79). No signal was held past the 2-minute mark waiting for one. Of the Safety only
+  trades Social + safety skipped, 138 of 141 have fewer than two links even now (before: 195 of 202).
+- Fixed: the port is read inside the `try` (a malformed link is "skipped"), and the loop marks a
+  token "failed" and moves on if fetching it ever raises, so one token can no longer stop the
+  queue. No strategy file, `shadow:` setting or `ENGINE_RULES` changed, so no new rules versions.
 
 ## Outside requests, per day
 

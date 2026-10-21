@@ -46,9 +46,10 @@ def fetch_urls(uri: Any, cfg: Mapping[str, Any]) -> list[str]:
         return []
     try:
         parts = urlsplit(uri.strip())
+        port = parts.port  # raises on a port that is not a number, e.g. "https://a.comblob:https://b"
     except ValueError:
         return []
-    if parts.scheme != "https" or parts.username or parts.port not in (None, 443):
+    if parts.scheme != "https" or parts.username or port not in (None, 443):
         return []
     ipfs = _IPFS_PATH.match(parts.path)
     if ipfs and not parts.query:
@@ -129,7 +130,13 @@ async def run(ctx: Ctx) -> None:
     while True:
         rows = ctx.store.description_candidates(time.time(), cfg["batch"])
         for row in rows:
-            ctx.description_counts[await fetch_one(ctx, row, time.time())] += 1
+            try:
+                result = await fetch_one(ctx, row, time.time())
+            except Exception as exc:  # noqa: BLE001 - one odd token must not stop the queue behind it
+                log.warning("metadata: giving up on %s (%r): %s: %s", row["mint"], row.get("metadata_uri"), type(exc).__name__, exc)
+                ctx.store.update_state(row["mint"], desc_state="failed")
+                result = "failed"
+            ctx.description_counts[result] += 1
         ctx.health.note(NAME, **ctx.description_counts, **ctx.metadata.stats())
         if len(rows) < cfg["batch"]:
             await asyncio.sleep(cfg["cycle_s"])
