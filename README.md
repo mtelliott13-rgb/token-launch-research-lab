@@ -69,24 +69,25 @@ About 5,700 lines of application code and 175 automated tests.
 
 ## Results
 
-Test window: Oct 20 – Nov 18, 2026 (29 days). 0.5 SOL per simulated trade, after all costs.
+Test window: Oct 20 – Nov 18, 2026 (29 days). 0.5 SOL per simulated trade.
+Every result includes exchange fees, network fees and modelled slippage on both the buy and the sell (see `buy()`, `sell()` and `_close()` in `radar/lab/shadow.py`).
 
-| Strategy | Trades | Hit rate | Median trade | Mean trade | Gate |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Every graduation | 4,050 | 21% | −62% | −6%\* | Fail |
-| Safety only (benchmark) | 1,901 | 17% | −65% | −46% | Fail |
-| Momentum + safety | 1,811 | 17% | −70% | −49% | Fail |
-| Social links + safety | 1,044 | 17% | −62% | −46% | Fail |
-| Clean deployer | 1,844 | 17% | −70% | −48% | Fail |
-| After the boost window | 474 | 19% | −53% | −41% | Fail |
-| Buyers not leaving | 221 | 26% | −52% | −28% | Fail |
-| Full stack (all filters) | 108 | 28% | −47% | −15% | Fail (too few trades, and unprofitable) |
-| Early de-risk (exit test) | 1,921 | 21% | −37% | −36% | Fail |
-| No-progress timeout (exit test) | 1,955 | 24% | −52% | −38% | Fail |
+| Strategy | Trades | Hit rate | Median trade | Mean trade | Profit (SOL) | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Every graduation\* | 4,049 | 21% | −62% | −40% | −819 | Fail |
+| Safety only (benchmark) | 1,901 | 17% | −65% | −46% | −439 | Fail |
+| Momentum + safety | 1,811 | 17% | −70% | −49% | −447 | Fail |
+| Social links + safety | 1,044 | 17% | −62% | −46% | −237 | Fail |
+| Clean deployer | 1,844 | 17% | −70% | −48% | −442 | Fail |
+| After the boost window | 474 | 19% | −53% | −41% | −98 | Fail |
+| Buyers not leaving | 221 | 26% | −52% | −28% | −31 | Fail |
+| Full stack (all filters) | 108 | 28% | −47% | −15% | −8 | Fail (too few trades, and unprofitable) |
+| Early de-risk (exit test) | 1,921 | 21% | −37% | −36% | −341 | Fail |
+| No-progress timeout (exit test) | 1,955 | 24% | −52% | −38% | −370 | Fail |
 
-\*Inflated by a single data glitch: an API briefly reported one token at a $196M market cap with
-$52 of volume, and the simulator "sold" into that phantom price. Without its best trade, this
-strategy lost 819 SOL.
+\*Excludes one glitch trade: an API briefly reported ChimpX AI at a $196M market cap with $52 of
+volume, and the simulator "sold" into that phantom price for +705 SOL. Including it, this strategy's
+mean was −6% and its loss 114 SOL. It failed the gate either way.
 
 ## What I learned
 
