@@ -49,7 +49,7 @@ def _iso_to_ts(value: Any) -> float | None:
 
 
 def parse_pools(payload: Any) -> list[dict[str, Any]]:
-    """One entry per pool whose base token is a meme token (not SOL or a stablecoin)."""
+    """One entry per pool whose base token is a newly launched token (not SOL or a stablecoin)."""
     if not isinstance(payload, dict):
         return []
     included = {i.get("id"): i.get("attributes") or {} for i in payload.get("included") or [] if isinstance(i, dict)}

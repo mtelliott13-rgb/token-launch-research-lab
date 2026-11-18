@@ -47,7 +47,7 @@ def squash(x: float) -> float:
 
 
 def is_eligible(snap: Mapping[str, Any], age_min: float | None, rising_cfg: Mapping[str, Any]) -> bool:
-    """Minimum bar for the Rising list: a meme token (not a stablecoin or a major token),
+    """Minimum bar for the Rising list: a newly launched token (not a stablecoin or a major token),
     enough liquidity, old enough, enough recent trades."""
     if snap.get("mint") in rising_cfg["exclude_mints"] or (snap.get("mcap") or 0) > rising_cfg["max_mcap_usd"]:
         return False

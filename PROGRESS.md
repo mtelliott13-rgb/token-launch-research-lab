@@ -79,7 +79,7 @@ Fixes after the first 20-hour run (2026-10-09):
 - **Holders column** on New launches and Rising, from RugCheck.
 - **"Likely bot volume" badge**: at least 300 trades in the last hour, price within 1% over the
   last hour and last 5 minutes, market cap under $1M.
-- **Rising is for meme coins only.** Tokens above $50M market cap and a fixed list of stablecoins
+- **Rising is for newly launched tokens only.** Tokens above $50M market cap and a fixed list of stablecoins
   and majors are left out. They are still recorded.
 - **Environment rebuilt** after the folder moved out of Documents, so `uv run pytest` works.
 - **Stray "radar 2/3/4" database files** were leftovers from Oct 8 test runs, created before the

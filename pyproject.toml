@@ -1,7 +1,7 @@
 [project]
-name = "meme-radar"
+name = "token-launch-research-lab"
 version = "0.1.0"
-description = "Solana meme coin research dashboard (local, read-only, no trading)"
+description = "Solana token launch research dashboard and paper-trading lab (local, read-only, no real trading)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

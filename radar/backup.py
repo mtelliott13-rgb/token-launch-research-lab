@@ -194,7 +194,7 @@ def app_is_running(cfg: dict[str, Any]) -> bool:
 def restore(cfg: dict[str, Any], backup: Path) -> Path:
     """Replace the database with a backup. The current database is kept, moved into data/archive/."""
     if app_is_running(cfg):
-        raise SystemExit("Meme Radar is still running. Stop it first (Ctrl+C in its terminal), then run this again.")
+        raise SystemExit("The app is still running. Stop it first (Ctrl+C in its terminal), then run this again.")
     db_path = db_path_of(cfg)
     incoming = db_path.with_name(db_path.name + ".restoring")
     with open_backup(backup) as fin, open(incoming, "wb") as fout:
@@ -234,7 +234,7 @@ def main(argv: list[str]) -> None:
               f"Backups now use {done['folder_bytes'] / 1e6:,.0f} MB.")
     elif what == "restore" and len(argv) == 2:
         archive = restore(cfg, Path(os.path.expanduser(argv[1])))
-        print(f"Restored. The database it replaced is in {archive}. Start Meme Radar again as usual.")
+        print(f"Restored. The database it replaced is in {archive}. Start the app again as usual.")
     else:
         raise SystemExit(__doc__)
 

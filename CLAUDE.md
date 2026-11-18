@@ -1,7 +1,7 @@
-# Meme Radar — Solana meme coin research & alert dashboard
+# Token Launch Research Lab — Solana token launch research & alert dashboard
 
 ## For the human (how to start)
-1. Make an empty folder (e.g. `meme-radar`) and put this file in it as `CLAUDE.md`.
+1. Make an empty folder (e.g. `token-launch-research-lab`) and put this file in it as `CLAUDE.md`.
 2. Open Claude Code in that folder.
 3. Say: **"Read CLAUDE.md and build Phase 1. Walk me through anything I need to install."**
 4. Leave the collector running as much as possible — the strategy work gets better the more data it has collected.
@@ -27,7 +27,7 @@ Order of evolution: research + backtesting → alerts the user acts on manually 
 - Explain to the user, in plain language, any command they need to run.
 
 ## Working rules (set by the user on 2026-10-08, apply for the whole project)
-1. Stay inside the meme-radar folder. Don't read, change or delete anything outside it. Temporary files go in the git-ignored `data/` folder.
+1. Stay inside this project folder. Don't read, change or delete anything outside it. Temporary files go in the git-ignored `data/` folder.
 2. Project-level installs (uv, Python packages for this project) are fine. Ask before installing anything system-wide (Homebrew, global npm/pip packages) or changing system settings.
 3. Commit to git after every step that works, with a clear message, so any change can be rolled back.
 4. No wallets, private keys, transaction signing or trading code. Stop and ask if anything heads that way.
@@ -124,7 +124,7 @@ Purpose: answer "would a bot that gets in early and auto-sells have made money?"
   - entry happens at the next snapshot after a signal, never at the signal price
   - slippage that scales with trade size vs. liquidity; platform + priority fees
   - exits by rule only (take-profit ladder, trailing stop, time stop) — never "sell at the peak"
-- Evaluate with walk-forward splits (tune on earlier weeks, test on later weeks). Report trade count, hit rate, **median** and mean return per trade, profit factor, max drawdown, and the share of total profit coming from the single best trade (meme returns are extremely lopsided; a strategy carried by one outlier is not a strategy).
+- Evaluate with walk-forward splits (tune on earlier weeks, test on later weeks). Report trade count, hit rate, **median** and mean return per trade, profit factor, max drawdown, and the share of total profit coming from the single best trade (launch-token returns are extremely lopsided; a strategy carried by one outlier is not a strategy).
 - Strategy rules live in `strategies/*.yaml` so they can be added without code changes. Starter rules will come from a separate research write-up.
 
 ## Phase 5 — Alerts + paper trading

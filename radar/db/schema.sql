@@ -1,4 +1,4 @@
--- Meme Radar schema. Every statement is idempotent; it runs on each start.
+-- Token Launch Research Lab schema. Every statement is idempotent; it runs on each start.
 -- Timestamps are Unix seconds (UTC) as REAL.
 
 -- One row per token, written the first time any source shows it to us.

@@ -1,4 +1,4 @@
-# Meme Radar settings. Edit and restart `uv run python -m radar` to apply.
+# Token Launch Research Lab settings. Edit and restart `uv run python -m radar` to apply.
 
 server:
   host: 127.0.0.1        # local only; do not expose this to the network
@@ -296,7 +296,7 @@ rising:
   min_age_min: 3
   min_txns_m5: 10
   max_snapshot_age_s: 180       # ignore tokens whose data is older than this
-  # This is a meme coin radar: stablecoins and major tokens are kept off the Rising list.
+  # This tracks new token launches: stablecoins and major tokens are kept off the Rising list.
   # Anything above max_mcap_usd is left out, and so is every address in exclude_mints
   # whatever its market cap. They are still recorded in the database.
   max_mcap_usd: 50000000

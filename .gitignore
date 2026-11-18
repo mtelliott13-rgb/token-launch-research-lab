@@ -1,10 +1,43 @@
-# Secrets
+# ---------------------------------------------------------------
+# Never commit secrets, data, or backups. A local pre-commit hook
+# (.git/hooks/pre-commit) also blocks these if force-added.
+# ---------------------------------------------------------------
+
+# Secrets and keys
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*keypair*.json
+id.json
+secrets/
+credentials*
 *.session
 *.session-journal
+.claude/settings.local.json
 
-# Collected data, logs, scratch files
+# Collected data, database, exports, logs, browser profile
 data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+*.csv
+*.log
+logs/
+exports/
+chrome-profile/
+
+# Backups
+backups/
+*-backups/
+*.zst
+*.gz
+*.bak
 
 # Python
 .venv/
@@ -12,5 +45,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# macOS
+# macOS / editors
 .DS_Store
+.vscode/
+.idea/

@@ -1,6 +1,6 @@
 """"Likely bot volume" flag v0: many trades, flat price.
 
-Organic buying and selling moves a meme token's price. Hundreds of trades in an
+Organic buying and selling moves a small token's price. Hundreds of trades in an
 hour that leave the price where it started usually mean the same wallets trading
 back and forth to inflate the volume and transaction counts.
 

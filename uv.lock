@@ -133,7 +133,7 @@ wheels = [
 ]
 
 [[package]]
-name = "meme-radar"
+name = "token-launch-research-lab"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

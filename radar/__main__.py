@@ -14,7 +14,7 @@ def main() -> None:
     cfg = load_settings()
     setup_logging(ROOT / cfg["logging"]["dir"], cfg["logging"]["level"])
     host, port = cfg["server"]["host"], cfg["server"]["port"]
-    logging.getLogger("radar").info("Meme Radar starting: open http://localhost:%s  (Ctrl+C to stop)", port)
+    logging.getLogger("radar").info("Token Launch Research Lab starting: open http://localhost:%s  (Ctrl+C to stop)", port)
     uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3)
 
 

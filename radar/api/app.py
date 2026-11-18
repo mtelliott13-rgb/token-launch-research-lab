@@ -32,7 +32,7 @@ from radar.view import authorities, is_mint, view_row
 log = logging.getLogger(__name__)
 
 STATIC = ROOT / "static"
-USER_AGENT = "meme-radar/0.1 (local research dashboard)"
+USER_AGENT = "token-launch-research-lab/0.1 (local research dashboard)"
 
 
 class WatchBody(BaseModel):
@@ -129,7 +129,7 @@ def create_app(cfg: dict[str, Any] | None = None) -> FastAPI:
             ctx.store.close()
             log.info("stopped cleanly")
 
-    app = FastAPI(title="Meme Radar", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(title="Token Launch Research Lab", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     def ctx_of(request: Request) -> Ctx:

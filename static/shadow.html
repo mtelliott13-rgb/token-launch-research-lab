@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Meme Radar: Shadow Bot</title>
+<title>Token Launch Research Lab: Paper Trading</title>
 <link rel="icon" href="data:,">
 <style>
   :root {
@@ -99,8 +99,8 @@
 </head>
 <body>
 <header>
-  <h1>Meme Radar</h1>
-  <nav class="nav"><a href="/">Dashboard</a><a href="/data">Data</a><a href="/patterns">Patterns</a><a href="/shadow" aria-current="page">Shadow Bot</a></nav>
+  <h1>Token Launch Research Lab</h1>
+  <nav class="nav"><a href="/">Dashboard</a><a href="/data">Data</a><a href="/patterns">Patterns</a><a href="/shadow" aria-current="page">Paper Trading</a></nav>
   <span id="conn"><span class="mark idle">●</span><span>loading</span></span>
   <div id="stats"></div>
 </header>
@@ -355,7 +355,7 @@ function render(d) {
     num(fmtInt(x.open_affected), "", `of ${x.open} open`),
     num(x.all.trades ? fmtSol(x.all.profit_sol) : DASH, sign(x.all.trades ? x.all.profit_sol : null))); }));
   $("aff-note").textContent = stale ? "Restart the collector to fill this table: the running one was started before trades were split this way, so for now every trade is counted above." : `While the computer sleeps or the app is off, no price is fetched and no stop can fire, so these results say more about the outage than about the strategy. Leaving them out is not neutral, though: a trade that runs for hours is more likely to meet an outage than one stopped out in minutes, so long-running trades (which include most big winners) are under-counted above. If the share in this table is large, treat every number on this page with suspicion.`;
-  $("cmp-note").textContent = "Only trades that were watched throughout are counted here. Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: meme returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
+  $("cmp-note").textContent = "Only trades that were watched throughout are counted here. Returns are per trade, on the SOL put in, after trading fees, transaction fees and slippage. Open positions are not in any figure except the last column, which values them at their latest price before selling costs. With few trades these numbers mean very little: launch-token returns are lopsided, so look at the median and at the profit without the best trade before the mean.";
   const old = list.flatMap((x, i) => x.earlier.map((e) => h("tr", null,
     h("td", { style: "white-space:nowrap" }, x.name), num(e.version), num(fmtInt(e.trades)),
     num(e.hit_rate_pct == null ? DASH : e.hit_rate_pct.toFixed(1) + "%"),
